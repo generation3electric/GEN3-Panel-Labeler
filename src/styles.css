@@ -63,6 +63,10 @@ input:focus,select:focus,.search:focus { border-color:#8eaa24; box-shadow:0 0 0 
 .cameraPrompt span { max-width:280px; opacity:.65; font-size:13px; line-height:1.45; }
 .cameraIcon { width:74px; height:74px; display:grid; place-items:center; border:2px solid rgba(255,255,255,.7); border-radius:18px; font-size:36px; margin-bottom:8px; }
 .retake { position:relative; margin:12px auto 0; display:block; width:max-content; color:#365771; font-weight:800; text-decoration:underline; cursor:pointer; }
+.skipPhoto { display:block; width:100%; min-height:50px; margin-top:12px; border:1px solid #cbd7e1; border-radius:12px; background:white; color:#526b82; font-weight:800; }
+.skipPhoto:hover,.skipPhoto:focus-visible { border-color:#8ba0b2; background:#f4f7f9; outline:none; }
+.skippedNotice { display:grid; gap:3px; margin-top:12px; padding:12px 14px; border-radius:12px; background:#eef2f5; color:#52677b; font-size:13px; }
+.skippedNotice strong { color:#294863; }
 .tips { margin-top:20px; display:grid; gap:4px; background:#e8eff3; border-radius:13px; padding:14px; color:#5d7184; font-size:13px; line-height:1.45; }
 .tips strong { color:#294863; }
 .completionCard { display:flex; gap:16px; align-items:center; margin:22px 0 16px; padding:18px; background:white; border:1px solid #dbe3e9; border-radius:15px; }
@@ -73,8 +77,9 @@ input:focus,select:focus,.search:focus { border-color:#8eaa24; box-shadow:0 0 0 
 .checkRow { display:grid; grid-template-columns:38px 1fr 22px; gap:10px; align-items:center; border:0; width:100%; background:white; padding:13px; border-radius:12px; text-align:left; color:#1c354e; }
 .checkRow strong,.checkRow small { display:block; }
 .checkRow small { color:#80909d; margin-top:3px; }
-.doneDot,.missingDot { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; font-weight:900; }
+.doneDot,.skippedDot,.missingDot { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; font-weight:900; }
 .doneDot { background:#e3efaa; color:#577100; }
+.skippedDot { background:#e7edf2; color:#5d7184; }
 .missingDot { background:#ffe8d7; color:#b95312; }
 .successWrap { text-align:center; padding-top:64px; }
 .successIcon { margin:0 auto 22px; width:82px; height:82px; border-radius:50%; display:grid; place-items:center; background:#b5d333; color:#18334d; font-size:42px; font-weight:900; }
