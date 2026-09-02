@@ -40,11 +40,14 @@ export default function App() {
   const [panel, setPanel] = useState({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
   const [photoIndex, setPhotoIndex] = useState(0);
   const [photos, setPhotos] = useState({});
+  const [skippedPhotos, setSkippedPhotos] = useState({});
   const [submitted, setSubmitted] = useState(false);
 
   const filteredJobs = sampleJobs.filter((j) => `${j.id} ${j.customer} ${j.address}`.toLowerCase().includes(query.toLowerCase()));
   const capturedCount = Object.keys(photos).length;
-  const complete = capturedCount === photoSteps.length;
+  const skippedCount = Object.keys(skippedPhotos).length;
+  const completedCount = capturedCount + skippedCount;
+  const complete = completedCount === photoSteps.length;
   const currentPhoto = photoSteps[photoIndex];
 
   const photoUrls = useMemo(() => {
@@ -55,12 +58,32 @@ export default function App() {
 
   function reset() {
     setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
-    setPhotoIndex(0); setPhotos({}); setSubmitted(false);
+    setPhotoIndex(0); setPhotos({}); setSkippedPhotos({}); setSubmitted(false);
   }
 
   function capture(key, file) {
     if (!file) return;
     setPhotos((prev) => ({ ...prev, [key]: file }));
+    setSkippedPhotos((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function goToNextPhoto() {
+    if (photoIndex === photoSteps.length - 1) setStep(4);
+    else setPhotoIndex(photoIndex + 1);
+  }
+
+  function skipPhoto(key) {
+    setSkippedPhotos((prev) => ({ ...prev, [key]: 'Not available' }));
+    setPhotos((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    goToNextPhoto();
   }
 
   if (submitted) {
@@ -76,7 +99,7 @@ export default function App() {
             <div><span>Location</span><strong>{job.address}</strong></div>
             <div><span>Panel</span><strong>{panel.name}</strong></div>
             <div><span>Manufacturer</span><strong>{panel.manufacturer}</strong></div>
-            <div><span>Photos</span><strong>{capturedCount} of {photoSteps.length}</strong></div>
+            <div><span>Photos</span><strong>{capturedCount} captured{skippedCount ? ` · ${skippedCount} skipped` : ''}</strong></div>
           </div>
           <button className="primary" onClick={reset}>Start Another Panel</button>
         </main>
@@ -156,10 +179,18 @@ export default function App() {
               <input type="file" accept="image/*" capture="environment" onChange={(e) => capture(currentPhoto.key, e.target.files?.[0])} />
             </label>
             {photos[currentPhoto.key] && <label className="retake">Retake photo<input type="file" accept="image/*" capture="environment" onChange={(e) => capture(currentPhoto.key, e.target.files?.[0])} /></label>}
+            {!photos[currentPhoto.key] && (
+              <button className="skipPhoto" type="button" onClick={() => skipPhoto(currentPhoto.key)}>
+                Skip — Not Available
+              </button>
+            )}
+            {skippedPhotos[currentPhoto.key] && (
+              <div className="skippedNotice"><strong>Previously skipped</strong><span>Take a photo above to replace the skipped status.</span></div>
+            )}
             <div className="tips"><strong>Photo quality</strong><span>Keep the phone square to the panel, fill the frame, avoid glare, and make sure breaker text is readable.</span></div>
             <div className="bottomActions">
               <button className="secondary" onClick={() => photoIndex === 0 ? setStep(2) : setPhotoIndex(photoIndex - 1)}>Back</button>
-              <button className="primary" disabled={!photos[currentPhoto.key]} onClick={() => photoIndex === photoSteps.length - 1 ? setStep(4) : setPhotoIndex(photoIndex + 1)}>{photoIndex === photoSteps.length - 1 ? 'Review Photos' : 'Next Photo'}</button>
+              <button className="primary" disabled={!photos[currentPhoto.key] && !skippedPhotos[currentPhoto.key]} onClick={goToNextPhoto}>{photoIndex === photoSteps.length - 1 ? 'Review Photos' : 'Next Photo'}</button>
             </div>
           </section>
         )}
@@ -168,12 +199,12 @@ export default function App() {
           <section>
             <p className="eyebrow">4 · Review</p>
             <h1>Make sure nothing is missing.</h1>
-            <div className="completionCard"><div className="completionNumber">{capturedCount}/{photoSteps.length}</div><div><strong>{complete ? 'Photo set complete' : 'Photos still needed'}</strong><span>{complete ? 'This panel is ready to submit.' : 'Open any missing item before leaving the job.'}</span></div></div>
+            <div className="completionCard"><div className="completionNumber">{completedCount}/{photoSteps.length}</div><div><strong>{complete ? 'Photo review complete' : 'Photos still need a decision'}</strong><span>{complete ? `${capturedCount} captured${skippedCount ? ` · ${skippedCount} not available` : ''}` : 'Capture each photo or mark it not available.'}</span></div></div>
             <div className="checklist">
               {photoSteps.map((p, i) => (
                 <button key={p.key} className="checkRow" onClick={() => { setPhotoIndex(i); setStep(3); }}>
-                  <span className={photos[p.key] ? 'doneDot' : 'missingDot'}>{photos[p.key] ? '✓' : '!'}</span>
-                  <span><strong>{p.title}</strong><small>{photos[p.key] ? 'Captured' : 'Missing — tap to add'}</small></span>
+                  <span className={photos[p.key] ? 'doneDot' : skippedPhotos[p.key] ? 'skippedDot' : 'missingDot'}>{photos[p.key] ? '✓' : skippedPhotos[p.key] ? '—' : '!'}</span>
+                  <span><strong>{p.title}</strong><small>{photos[p.key] ? 'Captured' : skippedPhotos[p.key] ? 'Not available — tap to add a photo' : 'Missing — tap to review'}</small></span>
                   <span className="chev">›</span>
                 </button>
               ))}
