@@ -54,11 +54,19 @@ async function graph(token, pathname, options = {}) {
     },
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text ? { raw: text } : null;
+  }
   if (!response.ok) {
     const message = data?.error?.message || `Microsoft Graph returned ${response.status}.`;
     const error = new Error(message);
     error.status = response.status;
+    error.code = data?.error?.code;
+    error.pathname = pathname;
+    error.details = data;
     throw error;
   }
   return data;
@@ -152,26 +160,56 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
       'Captured By': record.capturedBy || '',
       'Captured At': record.capturedAt,
     };
-    const fields = { Title: values.Title };
-    for (const [displayName, value] of Object.entries(values)) {
-      if (displayName === 'Title') continue;
-      const name = internalName(displayName);
-      if (name && value !== undefined && value !== null) fields[name] = value;
-    }
 
+    // Create the index row with only Title first. Some SharePoint column types can
+    // return a generic 500 when several fields are submitted together. Updating
+    // fields one at a time keeps the panel record saved and identifies any column
+    // that SharePoint rejects without failing the technician's entire Send action.
     const item = await graph(token, `/sites/${site.id}/lists/${list.id}/items`, {
       method: 'POST',
-      body: JSON.stringify({ fields }),
+      body: JSON.stringify({ fields: { Title: values.Title } }),
     });
+
+    const indexWarnings = [];
+    for (const [displayName, value] of Object.entries(values)) {
+      if (displayName === 'Title' || value === undefined || value === null) continue;
+      const name = internalName(displayName);
+      if (!name) continue;
+      try {
+        await graph(token, `/sites/${site.id}/lists/${list.id}/items/${item.id}/fields`, {
+          method: 'PATCH',
+          body: JSON.stringify({ [name]: value }),
+        });
+      } catch (error) {
+        const warning = `${displayName}: ${error.message}`;
+        indexWarnings.push(warning);
+        console.warn('SharePoint index field skipped:', {
+          displayName,
+          internalName: name,
+          status: error.status,
+          code: error.code,
+          pathname: error.pathname,
+          message: error.message,
+        });
+      }
+    }
 
     res.status(201).json({
       recordId: record.recordId,
       folderUrl: panelFolder.webUrl,
       listItemId: item.id,
       uploadedCount: uploaded.length,
+      indexWarnings,
     });
   } catch (error) {
-    console.error('SharePoint send failed:', error);
+    console.error('SharePoint send failed:', {
+      message: error.message,
+      status: error.status,
+      code: error.code,
+      pathname: error.pathname,
+      details: error.details,
+      stack: error.stack,
+    });
     res.status(error.status || 500).json({ error: error.message || 'The panel record could not be sent.' });
   }
 });
