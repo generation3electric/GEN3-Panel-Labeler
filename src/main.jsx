@@ -22,6 +22,21 @@ const demoPanel = {
   spaces: '30',
 };
 
+const shortcutStyle = {
+  position: 'fixed',
+  right: '16px',
+  top: '16px',
+  zIndex: 50,
+  background: '#b5d333',
+  color: '#15304a',
+  textDecoration: 'none',
+  fontWeight: 800,
+  fontSize: '13px',
+  padding: '10px 14px',
+  borderRadius: '18px',
+  boxShadow: '0 4px 14px rgba(10,32,56,.18)',
+};
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {pastRecords ? (
@@ -36,7 +51,7 @@ createRoot(document.getElementById('root')).render(
       />
     ) : (
       <>
-        <a className="pastRecordsShortcut" href="/past-records">Past Jobs</a>
+        <a style={shortcutStyle} href="/past-records">Past Jobs</a>
         <App />
       </>
     )}
