@@ -2,9 +2,12 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import ProcessingReview from './ProcessingReview.jsx';
+import PastRecords from './PastRecords.jsx';
 import './styles.css';
 
-const processingPreview = window.location.pathname === '/processing-preview';
+const pathname = window.location.pathname;
+const processingPreview = pathname === '/processing-preview';
+const pastRecords = pathname === '/past-records';
 
 const demoJob = {
   id: '7845621',
@@ -21,7 +24,9 @@ const demoPanel = {
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {processingPreview ? (
+    {pastRecords ? (
+      <PastRecords />
+    ) : processingPreview ? (
       <ProcessingReview
         job={demoJob}
         panel={demoPanel}
@@ -29,6 +34,11 @@ createRoot(document.getElementById('root')).render(
         savedRecord={null}
         onStartOver={() => { window.location.href = '/'; }}
       />
-    ) : <App />}
+    ) : (
+      <>
+        <a className="pastRecordsShortcut" href="/past-records">Past Jobs</a>
+        <App />
+      </>
+    )}
   </React.StrictMode>,
 );
