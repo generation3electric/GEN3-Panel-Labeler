@@ -2,7 +2,7 @@
 
 Mobile-first field workflow for collecting the information and photos needed to create accurate electrical panel labels.
 
-## Current prototype
+## Current workflow
 
 - Select a sample job (placeholder for ServiceTitan appointments)
 - Confirm customer/location information
@@ -11,7 +11,20 @@ Mobile-first field workflow for collecting the information and photos needed to 
 - Camera/file capture on mobile
 - Retake photos
 - Completion checklist prevents submission with missing required photos
-- Final panel record summary
+- One-button SharePoint submission
+- Job/panel folder creation, photo upload, metadata file, and index entry
+
+## SharePoint connection
+
+The Railway service securely connects to Microsoft Graph. Configure these Railway variables:
+
+- `MS_TENANT_ID`
+- `MS_CLIENT_ID`
+- `MS_CLIENT_SECRET`
+- `SHAREPOINT_HOSTNAME` (defaults to `2155124102.sharepoint.com`)
+- `SHAREPOINT_SITE_PATH` (defaults to `/sites/GEN3FieldRecords`)
+
+The Entra application needs Microsoft Graph application access to the GEN3 Field Records site. Prefer `Sites.Selected`; `Sites.ReadWrite.All` also works but grants broader access than this app needs.
 
 ## Run locally
 

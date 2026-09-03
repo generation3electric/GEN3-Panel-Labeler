@@ -42,6 +42,9 @@ export default function App() {
   const [photos, setPhotos] = useState({});
   const [skippedPhotos, setSkippedPhotos] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [savedRecord, setSavedRecord] = useState(null);
 
   const filteredJobs = sampleJobs.filter((j) => `${j.id} ${j.customer} ${j.address}`.toLowerCase().includes(query.toLowerCase()));
   const capturedCount = Object.keys(photos).length;
@@ -58,7 +61,7 @@ export default function App() {
 
   function reset() {
     setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
-    setPhotoIndex(0); setPhotos({}); setSkippedPhotos({}); setSubmitted(false);
+    setPhotoIndex(0); setPhotos({}); setSkippedPhotos({}); setSubmitted(false); setSending(false); setSendError(''); setSavedRecord(null);
   }
 
   function capture(key, file) {
@@ -86,14 +89,49 @@ export default function App() {
     goToNextPhoto();
   }
 
+  async function sendToSharePoint() {
+    setSending(true);
+    setSendError('');
+    const recordId = `PNL-${job.id}-${Date.now().toString(36).toUpperCase()}`;
+    const capturedAt = new Date().toISOString();
+    const form = new FormData();
+    form.append('record', JSON.stringify({
+      recordId,
+      capturedAt,
+      capturedBy: '',
+      job,
+      panel,
+      capturedCount,
+      skippedCount,
+      skippedPhotos,
+      photoSteps: photoSteps.map(({ key, title }) => ({ key, title, status: photos[key] ? 'Captured' : 'Skipped' })),
+    }));
+    Object.entries(photos).forEach(([key, file]) => {
+      const extension = file.name?.includes('.') ? file.name.split('.').pop() : 'jpg';
+      form.append('photos', file, `${String(photoSteps.findIndex((item) => item.key === key) + 1).padStart(2, '0')}-${key}.${extension}`);
+    });
+
+    try {
+      const response = await fetch('/api/sharepoint/panel-records', { method: 'POST', body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'The record could not be sent.');
+      setSavedRecord(result);
+      setSubmitted(true);
+    } catch (error) {
+      setSendError(error.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
   if (submitted) {
     return (
       <div className="appShell">
         <Header step={4} onHome={reset} />
         <main className="content successWrap">
           <div className="successIcon">✓</div>
-          <p className="eyebrow">Panel record saved</p>
-          <h1>Ready for processing</h1>
+          <p className="eyebrow">Sent to SharePoint</p>
+          <h1>Panel record complete</h1>
           <p className="muted">Job #{job.id} · {job.customer}</p>
           <div className="summaryCard">
             <div><span>Location</span><strong>{job.address}</strong></div>
@@ -101,6 +139,7 @@ export default function App() {
             <div><span>Manufacturer</span><strong>{panel.manufacturer}</strong></div>
             <div><span>Photos</span><strong>{capturedCount} captured{skippedCount ? ` · ${skippedCount} skipped` : ''}</strong></div>
           </div>
+          {savedRecord?.folderUrl && <a className="sharePointLink" href={savedRecord.folderUrl} target="_blank" rel="noreferrer">Open SharePoint folder</a>}
           <button className="primary" onClick={reset}>Start Another Panel</button>
         </main>
       </div>
@@ -211,8 +250,9 @@ export default function App() {
             </div>
             <div className="bottomActions">
               <button className="secondary" onClick={() => { setPhotoIndex(photoSteps.length - 1); setStep(3); }}>Back</button>
-              <button className="primary" disabled={!complete} onClick={() => setSubmitted(true)}>Submit Panel Record</button>
+              <button className="primary sendButton" disabled={!complete || sending} onClick={sendToSharePoint}>{sending ? 'Sending…' : 'Send'}</button>
             </div>
+            {sendError && <div className="sendError" role="alert"><strong>Could not send</strong><span>{sendError}</span><button type="button" onClick={sendToSharePoint}>Try again</button></div>}
           </section>
         )}
       </main>

@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "start": "vite preview --host 0.0.0.0 --port $PORT",
+    "start": "node server.js",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest"
