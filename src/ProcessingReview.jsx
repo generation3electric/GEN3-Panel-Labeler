@@ -55,6 +55,14 @@ function breakerFamily(row) {
   return kindByValue[row.breakerKind]?.family || 'standard';
 }
 
+function descriptionFontSize(text) {
+  const length = (text || '').length;
+  if (length > 150) return '10px';
+  if (length > 95) return '11px';
+  if (length > 55) return '12px';
+  return '13px';
+}
+
 export default function ProcessingReview({ job, panel, photoUrls, savedRecord, onStartOver }) {
   const [phase, setPhase] = useState('ready');
   const initialRows = useMemo(() => buildRows(panel.spaces), [panel.spaces]);
@@ -107,12 +115,23 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       <React.Fragment key={`${side}-${circuit}`}>
         <div className={`panelDescription ${side} ${row.confidence === 'Review' ? 'needsReview' : ''}`} style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }}>
           <span className="circuitNumber">{circuit}</span>
-          <input
-            list="common-circuit-names"
+          <textarea
+            className="circuitDescriptionInput"
             placeholder="Search or type circuit description…"
             value={row.description}
+            maxLength={280}
+            rows={rowSpan === 2 ? 5 : 3}
+            style={{ fontSize: descriptionFontSize(row.description) }}
             onChange={(e) => updateCircuit(row.circuit, 'description', e.target.value)}
+            aria-label={`Circuit ${row.circuit} description`}
           />
+          <div className="descriptionAssist">
+            <select value="" onChange={(e) => { if (e.target.value) updateCircuit(row.circuit, 'description', e.target.value); }} aria-label={`Choose common description for circuit ${row.circuit}`}>
+              <option value="">Common labels…</option>
+              {commonCircuits.map((name) => <option value={name} key={name}>{name}</option>)}
+            </select>
+            <span>{row.description.length}/280</span>
+          </div>
           {row.confidence === 'Review' && <span className="reviewFlag">Needs review</span>}
         </div>
         <div
@@ -211,10 +230,9 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   return (
     <main className="content processPage panelReviewPage">
-      <datalist id="common-circuit-names">{commonCircuits.map((name) => <option value={name} key={name} />)}</datalist>
       <p className="eyebrow">AI review preview</p>
       <h1>Verify the panel the way it is physically laid out.</h1>
-      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>The description stays on the outside. Amperage and breaker type are grouped together in the center breaker block.</span></div>
+      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Descriptions can now use the full label area, wrap onto multiple lines, and shrink slightly when they get long.</span></div>
       <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
       <PhysicalPanel />
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
