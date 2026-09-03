@@ -10,8 +10,18 @@ const SHAREPOINT_HOSTNAME = process.env.SHAREPOINT_HOSTNAME || '2155124102.share
 const SHAREPOINT_SITE_PATH = process.env.SHAREPOINT_SITE_PATH || '/sites/GEN3FieldRecords';
 const SHAREPOINT_LIBRARY = process.env.SHAREPOINT_LIBRARY || 'Panel Records';
 const SHAREPOINT_LIST = process.env.SHAREPOINT_LIST || 'Panel Record Index';
+const SERVICETITAN_AUTH_URL = 'https://auth.servicetitan.io/connect/token';
+const SERVICETITAN_API_URL = 'https://api.servicetitan.io';
 
 function microsoftConfigured() { return Boolean(process.env.MS_TENANT_ID && process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET); }
+function serviceTitanConfigured() {
+  return Boolean(
+    process.env.SERVICETITAN_APP_KEY &&
+    process.env.SERVICETITAN_CLIENT_ID &&
+    process.env.SERVICETITAN_CLIENT_SECRET &&
+    process.env.SERVICETITAN_TENANT_ID
+  );
+}
 function safeName(value, fallback = 'Unknown') {
   const cleaned = String(value || fallback).replace(/[~#%&*{}\\:<>?/+|\"]/g, '-').replace(/\s+/g, ' ').trim();
   return cleaned.slice(0, 120) || fallback;
@@ -22,6 +32,51 @@ async function getAccessToken() {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error_description || 'Microsoft authentication failed.');
   return data.access_token;
+}
+async function getServiceTitanAccessToken() {
+  if (!serviceTitanConfigured()) throw new Error('ServiceTitan is not configured on Railway.');
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: process.env.SERVICETITAN_CLIENT_ID,
+    client_secret: process.env.SERVICETITAN_CLIENT_SECRET,
+  });
+  const response = await fetch(SERVICETITAN_AUTH_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  if (!response.ok || !data?.access_token) {
+    const error = new Error(data?.error_description || data?.error || `ServiceTitan authentication returned ${response.status}.`);
+    error.status = response.status;
+    throw error;
+  }
+  return data.access_token;
+}
+async function serviceTitan(pathname, options = {}) {
+  const token = options.token || await getServiceTitanAccessToken();
+  const response = await fetch(`${SERVICETITAN_API_URL}${pathname}`, {
+    ...options,
+    token: undefined,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'ST-App-Key': process.env.SERVICETITAN_APP_KEY,
+      Accept: 'application/json',
+      ...options.headers,
+    },
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text ? { raw: text } : null; }
+  if (!response.ok) {
+    const error = new Error(data?.message || data?.error?.message || data?.title || `ServiceTitan returned ${response.status}.`);
+    error.status = response.status;
+    error.details = data;
+    throw error;
+  }
+  return data;
 }
 async function graph(token, pathname, options = {}) {
   const response = await fetch(`https://graph.microsoft.com/v1.0${pathname}`, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.body && !Buffer.isBuffer(options.body) ? { 'content-type': 'application/json' } : {}), ...options.headers } });
@@ -55,6 +110,27 @@ async function uploadFile(token, driveId, folderId, filename, buffer) {
 }
 
 app.get('/api/sharepoint/status', (_req, res) => res.json({ configured: microsoftConfigured() }));
+app.get('/api/servicetitan/status', async (_req, res) => {
+  if (!serviceTitanConfigured()) return res.status(503).json({ configured: false, authenticated: false, error: 'ServiceTitan variables are missing.' });
+  try {
+    const token = await getServiceTitanAccessToken();
+    res.json({ configured: true, authenticated: Boolean(token), tenantIdPresent: Boolean(process.env.SERVICETITAN_TENANT_ID), appKeyPresent: Boolean(process.env.SERVICETITAN_APP_KEY) });
+  } catch (error) {
+    console.error('ServiceTitan authentication test failed:', { message: error.message, status: error.status });
+    res.status(error.status || 502).json({ configured: true, authenticated: false, error: error.message });
+  }
+});
+app.get('/api/servicetitan/technicians', async (_req, res) => {
+  if (!serviceTitanConfigured()) return res.status(503).json({ error: 'ServiceTitan is not configured.' });
+  try {
+    const tenant = encodeURIComponent(process.env.SERVICETITAN_TENANT_ID);
+    const data = await serviceTitan(`/settings/v2/tenant/${tenant}/technicians?pageSize=200&active=true`);
+    res.json({ data: data?.data || [], hasMore: Boolean(data?.hasMore), continueFrom: data?.continueFrom || null });
+  } catch (error) {
+    console.error('ServiceTitan technicians failed:', { message: error.message, status: error.status, details: error.details });
+    res.status(error.status || 502).json({ error: error.message });
+  }
+});
 
 app.get('/api/sharepoint/panel-records', async (req, res) => {
   if (!microsoftConfigured()) return res.status(503).json({ error: 'The Microsoft connection has not been configured on Railway yet.' });
