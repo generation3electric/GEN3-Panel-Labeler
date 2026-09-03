@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import './PastRecords.css';
 
 function formatDate(value) {
   if (!value) return 'Unknown date';
@@ -51,25 +52,15 @@ export default function PastRecords() {
       </header>
 
       <main className="historyContent">
-        <input
-          className="historySearch"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search address, job number, panel, or record ID"
-        />
-
+        <input className="historySearch" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search address, job number, panel, or record ID" />
         {loading && <div className="historyState">Loading saved panel records…</div>}
         {error && <div className="historyState historyError">{error}</div>}
         {!loading && !error && filtered.length === 0 && <div className="historyState">No matching panel records found.</div>}
-
         <div className="historyList">
           {filtered.map((record) => (
             <article className="historyCard" key={record.id || record.recordId}>
               <div className="historyCardMain">
-                <div className="historyCardTopline">
-                  <span>Job #{record.jobNumber || '—'}</span>
-                  <span>{formatDate(record.capturedAt)}</span>
-                </div>
+                <div className="historyCardTopline"><span>Job #{record.jobNumber || '—'}</span><span>{formatDate(record.capturedAt)}</span></div>
                 <h2>{record.address || 'Address not indexed'}</h2>
                 <div className="historyMeta">
                   <span><b>Panel</b>{record.panelName || 'Unknown'}</span>
