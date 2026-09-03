@@ -13,6 +13,7 @@ const breakerKinds = [
   { value: '2p_standard', label: '2P Standard', poles: 2, family: 'standard' },
   { value: '1p_afci', label: '1P AFCI', poles: 1, family: 'afci' },
   { value: '1p_gfci', label: '1P GFCI', poles: 1, family: 'gfci' },
+  { value: '2p_gfci', label: '2P GFCI', poles: 2, family: 'gfci' },
   { value: '1p_dual', label: '1P Dual Function', poles: 1, family: 'dual' },
   { value: '1p_surge', label: '1P Surge', poles: 1, family: 'surge' },
   { value: '2p_surge', label: '2P Surge', poles: 2, family: 'surge' },
@@ -96,8 +97,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   function renderSide(circuit, side) {
     const row = byCircuit[circuit];
-    if (!row) return null;
-    if (row.continuationOf) return null;
+    if (!row || row.continuationOf) return null;
 
     const kind = kindByValue[row.breakerKind] || kindByValue['1p_standard'];
     const rowIndex = side === 'left' ? Math.ceil(circuit / 2) : circuit / 2;
@@ -113,19 +113,18 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             value={row.description}
             onChange={(e) => updateCircuit(row.circuit, 'description', e.target.value)}
           />
-          <select value={row.breakerKind} onChange={(e) => changeBreakerKind(row.circuit, e.target.value)}>
-            {breakerKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
           {row.confidence === 'Review' && <span className="reviewFlag">Needs review</span>}
         </div>
         <div
           className={`breakerTile ${side} family-${kind.family} ${row.confidence === 'Review' ? 'needsReview' : ''} ${kind.poles === 2 ? 'twoPole' : ''}`}
           style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }}
         >
-          <select value={row.amps} onChange={(e) => updateCircuit(row.circuit, 'amps', e.target.value)} aria-label={`Circuit ${row.circuit} amps`}>
+          <select className="ampSelect" value={row.amps} onChange={(e) => updateCircuit(row.circuit, 'amps', e.target.value)} aria-label={`Circuit ${row.circuit} amps`}>
             {[15,20,25,30,40,50,60,70,80,90,100,125,150,175,200].map((amp) => <option key={amp} value={amp}>{amp}A</option>)}
           </select>
-          <small>{kind.poles === 2 ? '2P' : kind.label.replace('1P ', '')}</small>
+          <select className="breakerKindSelect" value={row.breakerKind} onChange={(e) => changeBreakerKind(row.circuit, e.target.value)} aria-label={`Circuit ${row.circuit} breaker type`}>
+            {breakerKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
         </div>
       </React.Fragment>
     );
@@ -137,9 +136,9 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     return (
       <div className="cleanPanelGrid" style={{ '--panel-rows': physicalRows }}>
         <div className="panelGridHeader leftDescHead">ODD / LEFT</div>
-        <div className="panelGridHeader leftAmpHead">AMP</div>
+        <div className="panelGridHeader leftAmpHead">BREAKER</div>
         <div className="panelCenterLine" />
-        <div className="panelGridHeader rightAmpHead">AMP</div>
+        <div className="panelGridHeader rightAmpHead">BREAKER</div>
         <div className="panelGridHeader rightDescHead">EVEN / RIGHT</div>
         {odd.map((row) => renderSide(row.circuit, 'left'))}
         {even.map((row) => renderSide(row.circuit, 'right'))}
@@ -215,7 +214,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       <datalist id="common-circuit-names">{commonCircuits.map((name) => <option value={name} key={name} />)}</datalist>
       <p className="eyebrow">AI review preview</p>
       <h1>Verify the panel the way it is physically laid out.</h1>
-      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>One clean row system. No controls overlap the breaker column.</span></div>
+      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>The description stays on the outside. Amperage and breaker type are grouped together in the center breaker block.</span></div>
       <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
       <PhysicalPanel />
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
