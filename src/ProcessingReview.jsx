@@ -218,7 +218,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             <div><span>Address</span><strong>{job.address}</strong></div><div><span>Panel</span><strong>{panel.name}</strong></div>
             <div><span>Manufacturer</span><strong>{panel.manufacturer}</strong></div><div><span>Main</span><strong>{panel.mainAmps ? `${panel.mainAmps} A` : 'Verify'}</strong></div>
           </div>
-          <DirectoryPreview />
+          {DirectoryPreview()}
           <div className="directoryFooter">Verified panel directory · GEN3 Electric & HVAC · {new Date().toLocaleDateString()}</div>
         </section>
         <div className="finalActions noPrint"><button className="secondary" onClick={() => setPhase('review')}>Back to Review</button><button className="primary" onClick={() => window.print()}>Print / Save PDF</button></div>
@@ -234,9 +234,9 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       <h1>Verify the panel the way it is physically laid out.</h1>
       <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Descriptions can now use the full label area, wrap onto multiple lines, and shrink slightly when they get long.</span></div>
       <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
-      <PhysicalPanel />
+      {PhysicalPanel()}
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
-      <DirectoryPreview />
+      {DirectoryPreview()}
       <div className="reviewActions"><button className="secondary" onClick={() => setPhase('ready')}>Back</button><button className="primary" onClick={() => setPhase('final')}>Generate Final Directory</button></div>
       <div className="nextProcessCard"><span>Planned next step</span><strong>Load Calculation</strong><p>The verified breaker map becomes the electrical inventory for the load calculation, reducing duplicate entry.</p></div>
     </main>
