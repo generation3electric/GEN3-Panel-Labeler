@@ -2,10 +2,11 @@ import React, { useMemo, useState } from 'react';
 import './ProcessingReview.css';
 
 const commonCircuits = [
-  'Kitchen Receptacles','Kitchen Lighting','Dining Room','Living Room','Bedroom 1','Bedroom 2','Bedroom 3',
-  'Bathroom','Bathroom GFCI','Laundry','Washer','Dryer','Dishwasher','Garbage Disposal','Microwave','Range',
-  'Refrigerator','Basement','Garage','Exterior / GFCI','Smoke / CO','HVAC','Air Handler','Condenser','Heat Pump',
-  'Water Heater','Boiler','Sump Pump','EV Charger','Pool','Spa','Subpanel','Surge Protector','Spare','Unknown'
+  'Kitchen','Kitchen Receptacles','Kitchen Lighting','Kitchen Counter','Dining Room','Dining Room Lights','Living Room','Living Room Lights',
+  'Bedroom 1','Bedroom 2','Bedroom 3','Bedroom Lights','Bathroom','Bathroom Lights','Bathroom GFCI','Laundry','Washer','Dryer',
+  'Dishwasher','Garbage Disposal','Microwave','Range','Refrigerator','Basement','Basement Lights','Garage','Garage Receptacles',
+  'Exterior','Exterior Lights','Exterior / GFCI','Smoke / CO','HVAC','Air Handler','Condenser','Heat Pump','Water Heater','Boiler',
+  'Sump Pump','EV Charger','Pool','Spa','Hot Tub','Subpanel','Surge Protector','Lighting','Receptacles','Spare','Unknown'
 ];
 
 const breakerKinds = [
@@ -67,6 +68,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   const [phase, setPhase] = useState('ready');
   const initialRows = useMemo(() => buildRows(panel.spaces), [panel.spaces]);
   const [rows, setRows] = useState(initialRows);
+  const [labelQueries, setLabelQueries] = useState({});
 
   function runPreview() {
     setPhase('processing');
@@ -77,6 +79,17 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     setRows((current) => current.map((row) => {
       if (row.circuit === circuit || row.continuationOf === circuit) return { ...row, [key]: value };
       return row;
+    }));
+  }
+
+  function appendCommonLabel(circuit, label) {
+    setRows((current) => current.map((row) => {
+      if (row.circuit !== circuit && row.continuationOf !== circuit) return row;
+      const existing = (row.description || '').trim();
+      const parts = existing.split(',').map((part) => part.trim().toLowerCase()).filter(Boolean);
+      if (parts.includes(label.toLowerCase())) return row;
+      const next = existing ? `${existing}, ${label}` : label;
+      return { ...row, description: next.slice(0, 280) };
     }));
   }
 
@@ -110,6 +123,8 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     const kind = kindByValue[row.breakerKind] || kindByValue['1p_standard'];
     const rowIndex = side === 'left' ? Math.ceil(circuit / 2) : circuit / 2;
     const rowSpan = kind.poles === 2 ? 2 : 1;
+    const query = labelQueries[row.circuit] || '';
+    const filteredLabels = commonCircuits.filter((name) => name.toLowerCase().includes(query.toLowerCase())).slice(0, 14);
 
     return (
       <React.Fragment key={`${side}-${circuit}`}>
@@ -126,10 +141,23 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             aria-label={`Circuit ${row.circuit} description`}
           />
           <div className="descriptionAssist">
-            <select value="" onChange={(e) => { if (e.target.value) updateCircuit(row.circuit, 'description', e.target.value); }} aria-label={`Choose common description for circuit ${row.circuit}`}>
-              <option value="">Common labels…</option>
-              {commonCircuits.map((name) => <option value={name} key={name}>{name}</option>)}
-            </select>
+            <details className="labelPicker">
+              <summary>+ Add common labels</summary>
+              <div className="labelPickerPanel">
+                <input
+                  value={query}
+                  onChange={(e) => setLabelQueries((current) => ({ ...current, [row.circuit]: e.target.value }))}
+                  placeholder="Search labels…"
+                  aria-label={`Search common labels for circuit ${row.circuit}`}
+                />
+                <div className="labelChoices">
+                  {filteredLabels.map((name) => (
+                    <button type="button" key={name} onClick={() => appendCommonLabel(row.circuit, name)}>{name}</button>
+                  ))}
+                  {!filteredLabels.length && <span className="noLabels">No matching labels</span>}
+                </div>
+              </div>
+            </details>
             <span>{row.description.length}/280</span>
           </div>
           {row.confidence === 'Review' && <span className="reviewFlag">Needs review</span>}
@@ -232,7 +260,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     <main className="content processPage panelReviewPage">
       <p className="eyebrow">AI review preview</p>
       <h1>Verify the panel the way it is physically laid out.</h1>
-      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Descriptions can now use the full label area, wrap onto multiple lines, and shrink slightly when they get long.</span></div>
+      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Type anything you need, or add several common labels to build a description quickly.</span></div>
       <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
       {PhysicalPanel()}
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
