@@ -21,7 +21,7 @@ const breakerKinds = [
 const kindByValue = Object.fromEntries(breakerKinds.map((kind) => [kind.value, kind]));
 
 function buildRows(spaces) {
-  const count = Math.max(12, Math.min(Number(spaces) || 20, 42));
+  const count = Math.max(12, Math.min(Number(spaces) || 30, 42));
   const result = Array.from({ length: count }, (_, index) => ({
     circuit: index + 1,
     amps: [15,20,20,20,15,20,15,15,20,20,15,20][index % 12],
@@ -45,8 +45,8 @@ function buildRows(spaces) {
     second.confidence = first.confidence;
   };
 
-  if (count >= 16) makeTwoPole(count % 2 === 0 ? count - 5 : count - 4, 30, 'Dryer');
-  if (count >= 20) makeTwoPole(count % 2 === 0 ? count - 6 : count - 5, 50, 'Range');
+  if (count >= 26) makeTwoPole(24, 50, 'Range');
+  if (count >= 27) makeTwoPole(25, 30, 'Dryer');
   return result;
 }
 
@@ -61,7 +61,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   function runPreview() {
     setPhase('processing');
-    window.setTimeout(() => setPhase('review'), 900);
+    window.setTimeout(() => setPhase('review'), 700);
   }
 
   function updateCircuit(circuit, key, value) {
@@ -94,58 +94,83 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   const physicalRows = Math.ceil(rows.length / 2);
   const reviewCount = rows.filter((r) => r.confidence === 'Review' && !r.continuationOf).length;
 
-  function renderBreaker(circuit, side, compact = false) {
+  function renderSide(circuit, side) {
     const row = byCircuit[circuit];
-    if (!row) return <div className={`panelSlot empty ${side}`} />;
-    if (row.continuationOf) {
-      const source = byCircuit[row.continuationOf];
-      const family = source ? breakerFamily(source) : 'standard';
-      return (
-        <div className={`panelSlot continuation ${side} family-${family} ${source?.confidence === 'Review' ? 'needsReview' : ''} ${compact ? 'compactSlot' : ''}`}>
-          <span className="slotNumber">{row.circuit}</span>
-          <div className="breakerBody continuationBody"><strong>{row.amps}A</strong><small>2P</small></div>
-          {!compact && <div className="continuationDescription">{row.description || 'Unlabeled'}</div>}
-        </div>
-      );
-    }
+    if (!row) return null;
+    if (row.continuationOf) return null;
 
     const kind = kindByValue[row.breakerKind] || kindByValue['1p_standard'];
+    const rowIndex = side === 'left' ? Math.ceil(circuit / 2) : circuit / 2;
+    const rowSpan = kind.poles === 2 ? 2 : 1;
+
     return (
-      <div className={`panelSlot ${side} family-${kind.family} ${row.confidence === 'Review' ? 'needsReview' : ''} ${kind.poles === 2 ? 'twoPoleStart' : ''} ${compact ? 'compactSlot' : ''}`}>
-        <span className="slotNumber">{row.circuit}</span>
-        <div className="breakerBody">
+      <React.Fragment key={`${side}-${circuit}`}>
+        <div className={`panelDescription ${side} ${row.confidence === 'Review' ? 'needsReview' : ''}`} style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }}>
+          <span className="circuitNumber">{circuit}</span>
+          <input
+            list="common-circuit-names"
+            placeholder="Search or type circuit description…"
+            value={row.description}
+            onChange={(e) => updateCircuit(row.circuit, 'description', e.target.value)}
+          />
+          <select value={row.breakerKind} onChange={(e) => changeBreakerKind(row.circuit, e.target.value)}>
+            {breakerKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+          {row.confidence === 'Review' && <span className="reviewFlag">Needs review</span>}
+        </div>
+        <div
+          className={`breakerTile ${side} family-${kind.family} ${row.confidence === 'Review' ? 'needsReview' : ''} ${kind.poles === 2 ? 'twoPole' : ''}`}
+          style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }}
+        >
           <select value={row.amps} onChange={(e) => updateCircuit(row.circuit, 'amps', e.target.value)} aria-label={`Circuit ${row.circuit} amps`}>
             {[15,20,25,30,40,50,60,70,80,90,100,125,150,175,200].map((amp) => <option key={amp} value={amp}>{amp}A</option>)}
           </select>
-          {!compact && <span className="breakerKindShort">{kind.label}</span>}
+          <small>{kind.poles === 2 ? '2P' : kind.label.replace('1P ', '')}</small>
         </div>
-        {!compact && (
-          <div className="breakerEdit">
-            <select className="kindSelect" value={row.breakerKind} onChange={(e) => changeBreakerKind(row.circuit, e.target.value)}>
-              {breakerKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-            <input list="common-circuit-names" placeholder="Search or type circuit description…" value={row.description} onChange={(e) => updateCircuit(row.circuit, 'description', e.target.value)} />
-          </div>
-        )}
-        {compact && <div className="compactDescription">{row.description || 'Unlabeled'}</div>}
-        {row.confidence === 'Review' && !compact && <span className="reviewBadge">Needs review</span>}
+      </React.Fragment>
+    );
+  }
+
+  function PhysicalPanel() {
+    const odd = rows.filter((r) => r.circuit % 2 === 1 && !r.continuationOf);
+    const even = rows.filter((r) => r.circuit % 2 === 0 && !r.continuationOf);
+    return (
+      <div className="cleanPanelGrid" style={{ '--panel-rows': physicalRows }}>
+        <div className="panelGridHeader leftDescHead">ODD / LEFT</div>
+        <div className="panelGridHeader leftAmpHead">AMP</div>
+        <div className="panelCenterLine" />
+        <div className="panelGridHeader rightAmpHead">AMP</div>
+        <div className="panelGridHeader rightDescHead">EVEN / RIGHT</div>
+        {odd.map((row) => renderSide(row.circuit, 'left'))}
+        {even.map((row) => renderSide(row.circuit, 'right'))}
       </div>
     );
   }
 
-  function DirectoryPreview({ final = false }) {
+  function DirectoryPreview() {
     return (
-      <section className={`liveDirectory ${final ? 'finalPreview' : ''}`}>
-        <div className="previewTop">
-          <div><span className="miniEyebrow">Generated directory</span><strong>{panel.name}</strong><small>{job.address}</small></div>
+      <section className="directoryPreviewClean">
+        <div className="directoryPreviewHeader">
+          <div><span>Generated directory</span><strong>{panel.name}</strong><small>{job.address}</small></div>
           {photoUrls?.breakerField ? <img src={photoUrls.breakerField} alt="Panel" /> : <div className="photoPlaceholder">Panel photo</div>}
         </div>
-        <div className="previewMeta"><span>Job #{job.id}</span><span>{panel.mainAmps ? `${panel.mainAmps}A Main` : 'Main: verify'}</span></div>
-        <div className="miniPanel">
-          {Array.from({ length: physicalRows }, (_, index) => {
-            const odd = index * 2 + 1;
-            const even = index * 2 + 2;
-            return <React.Fragment key={index}>{renderBreaker(odd, 'left', true)}{renderBreaker(even, 'right', true)}</React.Fragment>;
+        <div className="directoryPreviewMeta"><b>Job #{job.id}</b><b>{panel.mainAmps ? `${panel.mainAmps}A Main` : 'Main: verify'}</b></div>
+        <div className="directoryRows">
+          {Array.from({ length: physicalRows }, (_, i) => {
+            const left = byCircuit[i * 2 + 1];
+            const right = byCircuit[i * 2 + 2];
+            const leftSource = left?.continuationOf ? byCircuit[left.continuationOf] : left;
+            const rightSource = right?.continuationOf ? byCircuit[right.continuationOf] : right;
+            return (
+              <div className="directoryPreviewRow" key={i}>
+                <span>{left ? left.circuit : ''}</span>
+                <div className={`miniBreaker ${leftSource ? `family-${breakerFamily(leftSource)}` : ''}`}>{leftSource ? `${leftSource.amps}A` : ''}</div>
+                <div className="miniDescription leftText">{left?.continuationOf ? '↳' : leftSource?.description || 'Unlabeled'}</div>
+                <div className="miniDescription rightText">{right?.continuationOf ? '↳' : rightSource?.description || 'Unlabeled'}</div>
+                <div className={`miniBreaker ${rightSource ? `family-${breakerFamily(rightSource)}` : ''}`}>{rightSource ? `${rightSource.amps}A` : ''}</div>
+                <span>{right ? right.circuit : ''}</span>
+              </div>
+            );
           })}
         </div>
       </section>
@@ -157,14 +182,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       <main className="content processPage">
         <p className="eyebrow">Panel processing</p>
         <h1>Turn the field record into a finished directory.</h1>
-        <p className="lead">The review screen follows the physical panel and keeps the finished directory visible while you edit it.</p>
-        <div className="processSteps">
-          <div><span>1</span><strong>Read breaker geometry</strong><small>Position, amperage, pole count and breaker family</small></div>
-          <div><span>2</span><strong>Read labels when available</strong><small>Blank descriptions are allowed and easy to fill in</small></div>
-          <div><span>3</span><strong>Human verification</strong><small>One breaker-type selector plus a larger description field</small></div>
-          <div><span>4</span><strong>Generate the directory</strong><small>Panel image and breaker layout stay attached to the permanent record</small></div>
-        </div>
-        {photoUrls?.breakerField && <img className="processHeroPhoto" src={photoUrls.breakerField} alt="Breaker field" />}
+        <p className="lead">The review screen mirrors the physical panel without stacking controls on top of each other.</p>
         <button className="primary large" onClick={runPreview} disabled={phase === 'processing'}>{phase === 'processing' ? 'Processing photos…' : 'Process Panel Photos'}</button>
         {savedRecord?.folderUrl && <a className="sharePointLink" href={savedRecord.folderUrl} target="_blank" rel="noreferrer">Open source photos in SharePoint</a>}
       </main>
@@ -182,11 +200,11 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             <div><span>Address</span><strong>{job.address}</strong></div><div><span>Panel</span><strong>{panel.name}</strong></div>
             <div><span>Manufacturer</span><strong>{panel.manufacturer}</strong></div><div><span>Main</span><strong>{panel.mainAmps ? `${panel.mainAmps} A` : 'Verify'}</strong></div>
           </div>
-          <DirectoryPreview final />
+          <DirectoryPreview />
           <div className="directoryFooter">Verified panel directory · GEN3 Electric & HVAC · {new Date().toLocaleDateString()}</div>
         </section>
         <div className="finalActions noPrint"><button className="secondary" onClick={() => setPhase('review')}>Back to Review</button><button className="primary" onClick={() => window.print()}>Print / Save PDF</button></div>
-        <div className="nextProcessCard noPrint"><span>Next process</span><strong>Panel Load Calculation</strong><p>Use the verified breakers, appliance circuits and service size as the starting point for the load-calculation workflow.</p><button disabled>Coming next</button></div>
+        <div className="nextProcessCard noPrint"><span>Next process</span><strong>Panel Load Calculation</strong><p>Use the verified breakers, appliance circuits and service size as the starting point for the load-calculation workflow.</p></div>
         <button className="secondary noPrint" onClick={onStartOver}>Start Another Panel</button>
       </main>
     );
@@ -197,21 +215,11 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       <datalist id="common-circuit-names">{commonCircuits.map((name) => <option value={name} key={name} />)}</datalist>
       <p className="eyebrow">AI review preview</p>
       <h1>Verify the panel the way it is physically laid out.</h1>
-      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Descriptions have extra room. Breaker type and pole count are combined into one selector.</span></div>
-      <div className="reviewWorkspace">
-        <div className="reviewEditor">
-          <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
-          <div className="physicalPanel">
-            <div className="panelColumnHeader leftHeader">ODD / LEFT</div><div className="centerHeader">AMP</div><div className="panelColumnHeader rightHeader">EVEN / RIGHT</div>
-            {Array.from({ length: physicalRows }, (_, index) => {
-              const odd = index * 2 + 1;
-              const even = index * 2 + 2;
-              return <React.Fragment key={index}>{renderBreaker(odd, 'left')}{renderBreaker(even, 'right')}</React.Fragment>;
-            })}
-          </div>
-        </div>
-        <aside className="directoryPreviewRail"><DirectoryPreview /></aside>
-      </div>
+      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>One clean row system. No controls overlap the breaker column.</span></div>
+      <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
+      <PhysicalPanel />
+      <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
+      <DirectoryPreview />
       <div className="reviewActions"><button className="secondary" onClick={() => setPhase('ready')}>Back</button><button className="primary" onClick={() => setPhase('final')}>Generate Final Directory</button></div>
       <div className="nextProcessCard"><span>Planned next step</span><strong>Load Calculation</strong><p>The verified breaker map becomes the electrical inventory for the load calculation, reducing duplicate entry.</p></div>
     </main>
