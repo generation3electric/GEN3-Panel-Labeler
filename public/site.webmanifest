@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "GEN3 Panel Labeler",
+  "short_name": "Panel Labeler",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#00B5E6",
+  "theme_color": "#0b2748",
+  "icons": [
+    {
+      "src": "/icons/panel-labeler-oggi-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/panel-labeler-oggi-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
