@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
+import { getPendingCount, getPendingPanels, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
 
 const sampleJobs = [
   { id: '7845621', time: '10:00 AM', customer: 'John Smith', address: '1428 Pine Street, Philadelphia, PA 19102' },
@@ -9,20 +10,26 @@ const sampleJobs = [
 
 const manufacturers = ['Unknown', 'Square D', 'Eaton / Cutler-Hammer', 'Siemens', 'GE', 'Federal Pacific', 'Zinsco', 'Other'];
 
-function Header({ step, onHome }) {
+function Header({ step, onHome, online, pendingCount, syncing }) {
   return (
     <header className="topbar">
       <button className="brand" onClick={onHome} aria-label="Go home">
         <span className="bolt">⚡</span>
         <span><strong>GEN3</strong><small>Panel Labeler</small></span>
       </button>
-      {step > 0 && <div className="stepPill">Step {Math.min(step, 4)} of 4</div>}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="stepPill" style={{ background: online ? 'rgba(255,255,255,.11)' : '#8b3b19' }}>
+          {syncing ? 'Syncing…' : online ? (pendingCount ? `${pendingCount} pending` : 'Online') : 'Offline · saved locally'}
+        </div>
+        {step > 0 && <div className="stepPill">Step {Math.min(step, 4)} of 4</div>}
+      </div>
     </header>
   );
 }
 
 function PhotoTile({ file, label, onRemove }) {
   const url = useMemo(() => URL.createObjectURL(file), [file]);
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
   return (
     <div style={{ background: '#fff', border: '1px solid #dbe4ea', borderRadius: 12, padding: 8 }}>
       <img src={url} alt={label} style={{ width: '100%', height: 170, objectFit: 'cover', borderRadius: 9, background: '#102b47' }} />
@@ -56,6 +63,10 @@ export default function App() {
   const [sendError, setSendError] = useState('');
   const [savedRecord, setSavedRecord] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [localNotice, setLocalNotice] = useState('');
 
   const filteredJobs = sampleJobs.filter((j) => `${j.id} ${j.customer} ${j.address}`.toLowerCase().includes(query.toLowerCase()));
   const capturedCount = (overview ? 1 : 0) + leftPhotos.length + rightPhotos.length + (directory ? 1 : 0);
@@ -70,52 +81,108 @@ export default function App() {
     return result;
   }, [overview, leftPhotos, rightPhotos, directory]);
 
-  function reset() {
-    setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
-    setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setSending(false); setSendError(''); setSavedRecord(null); setProcessing(false);
+  async function refreshPendingCount() {
+    try { setPendingCount(await getPendingCount()); } catch (error) { console.warn('Could not read offline queue', error); }
   }
 
-  async function sendToSharePoint() {
-    setSending(true);
-    setSendError('');
+  async function uploadQueuedItem(item) {
+    const response = await fetch('/api/sharepoint/panel-records', { method: 'POST', body: panelToFormData(item) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Upload failed.');
+    await markPanelUploaded(item.recordId, result);
+    return result;
+  }
+
+  async function syncPending() {
+    if (!navigator.onLine || syncing) return;
+    setSyncing(true);
+    try {
+      const items = await getPendingPanels();
+      for (const item of items) {
+        try { await uploadQueuedItem(item); }
+        catch (error) { console.warn(`Pending panel ${item.recordId} remains local:`, error.message); break; }
+      }
+    } finally {
+      await refreshPendingCount();
+      setSyncing(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshPendingCount();
+    const onOnline = () => { setOnline(true); window.setTimeout(syncPending, 250); };
+    const onOffline = () => setOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    if (navigator.onLine) window.setTimeout(syncPending, 500);
+    return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
+  }, []);
+
+  function reset() {
+    setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
+    setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setSending(false); setSendError(''); setSavedRecord(null); setProcessing(false); setLocalNotice('');
+  }
+
+  function buildQueuedRecord() {
     const recordId = `PNL-${job.id}-${Date.now().toString(36).toUpperCase()}`;
     const capturedAt = new Date().toISOString();
-    const form = new FormData();
     const photoManifest = [
       { key: 'overview', title: 'Full Panel Overview', status: overview ? 'Captured' : 'Missing' },
       ...leftPhotos.map((_, i) => ({ key: `left-${i + 1}`, title: `Left Breakers ${i + 1}`, status: 'Captured' })),
       ...rightPhotos.map((_, i) => ({ key: `right-${i + 1}`, title: `Right Breakers ${i + 1}`, status: 'Captured' })),
       { key: 'directory', title: 'Existing Panel Label', status: directory ? 'Captured' : 'Optional / not provided' },
     ];
-    form.append('record', JSON.stringify({ recordId, capturedAt, capturedBy: '', job, panel, capturedCount, skippedCount: directory ? 0 : 1, skippedPhotos: directory ? {} : { directory: 'Optional / not provided' }, photoSteps: photoManifest }));
-
-    const appendFile = (key, file, sort) => {
+    const record = { recordId, capturedAt, capturedBy: '', job, panel, capturedCount, skippedCount: directory ? 0 : 1, skippedPhotos: directory ? {} : { directory: 'Optional / not provided' }, photoSteps: photoManifest };
+    const photos = [];
+    const add = (key, file, sort) => {
       if (!file) return;
       const extension = file.name?.includes('.') ? file.name.split('.').pop() : 'jpg';
-      form.append('photos', file, `${String(sort).padStart(2, '0')}-${key}.${extension}`);
+      photos.push({ file, name: `${String(sort).padStart(2, '0')}-${key}.${extension}`, type: file.type || 'image/jpeg' });
     };
-    appendFile('overview', overview, 1);
-    leftPhotos.forEach((file, i) => appendFile(`left-${i + 1}`, file, 10 + i));
-    rightPhotos.forEach((file, i) => appendFile(`right-${i + 1}`, file, 30 + i));
-    appendFile('directory', directory, 90);
+    add('overview', overview, 1);
+    leftPhotos.forEach((file, i) => add(`left-${i + 1}`, file, 10 + i));
+    rightPhotos.forEach((file, i) => add(`right-${i + 1}`, file, 30 + i));
+    add('directory', directory, 90);
+    return { recordId, record, photos, savedLocallyAt: new Date().toISOString() };
+  }
 
+  async function saveAndSend() {
+    setSending(true);
+    setSendError('');
+    setLocalNotice('');
+    const queued = buildQueuedRecord();
     try {
-      const response = await fetch('/api/sharepoint/panel-records', { method: 'POST', body: form });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'The record could not be sent.');
-      setSavedRecord(result);
-      setProcessing(true);
+      await savePendingPanel(queued);
+      await refreshPendingCount();
+      if (!navigator.onLine) {
+        setLocalNotice('Saved on this device. It will upload automatically when data service returns.');
+        resetAfterLocalSave();
+        return;
+      }
+      try {
+        const result = await uploadQueuedItem(queued);
+        setSavedRecord(result);
+        await refreshPendingCount();
+        setProcessing(true);
+      } catch (error) {
+        setLocalNotice('Upload could not finish, so the complete panel is still saved safely on this device and will retry later.');
+        setSendError(error.message);
+      }
     } catch (error) {
-      setSendError(error.message);
+      setSendError(`Could not save the panel locally: ${error.message}`);
     } finally {
       setSending(false);
     }
   }
 
+  function resetAfterLocalSave() {
+    setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setStep(0); setJob(null);
+  }
+
   if (processing) {
     return (
       <div className="appShell">
-        <Header step={4} onHome={reset} />
+        <Header step={4} onHome={reset} online={online} pendingCount={pendingCount} syncing={syncing} />
         <ProcessingReview job={job} panel={panel} photoUrls={processingPhotoUrls} savedRecord={savedRecord} onStartOver={reset} />
       </div>
     );
@@ -123,36 +190,32 @@ export default function App() {
 
   return (
     <div className="appShell">
-      <Header step={step} onHome={reset} />
+      <Header step={step} onHome={reset} online={online} pendingCount={pendingCount} syncing={syncing} />
       <main className="content">
+        {localNotice && <div className="infoStrip" style={{ marginBottom: 18 }}><strong>Offline record:</strong> {localNotice}</div>}
         {step === 0 && (
           <section>
             <p className="eyebrow">Field tool</p>
             <h1>Create a clean panel directory with fewer photos.</h1>
-            <p className="lead">Capture one overview, then take only as many breaker photos as needed on the left and right sides. AI uses those photos to build the typed directory.</p>
+            <p className="lead">Capture one overview, then take only as many breaker photos as needed on the left and right sides. The app keeps working in basement dead zones and syncs later.</p>
             <button className="primary large" onClick={() => setStep(1)}>Start Panel Label</button>
+            {pendingCount > 0 && <div className="infoStrip"><strong>{pendingCount} panel{pendingCount === 1 ? '' : 's'} waiting to upload.</strong> {online ? 'Sync will retry automatically.' : 'They are stored on this device until service returns.'}</div>}
           </section>
         )}
 
         {step === 1 && (
           <section>
-            <p className="eyebrow">1 · Identify the job</p>
-            <h1>Which job are you on?</h1>
-            <p className="muted">These are sample jobs for now. This screen is ready to be replaced by live ServiceTitan appointments.</p>
+            <p className="eyebrow">1 · Identify the job</p><h1>Which job are you on?</h1>
+            <p className="muted">Load the job before entering a dead zone. Once loaded, panel setup and photos work without data.</p>
             <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search job #, customer, or address" />
-            <div className="jobs">{filteredJobs.map((j) => (
-              <button key={j.id} className={`jobCard ${job?.id === j.id ? 'selected' : ''}`} onClick={() => setJob(j)}>
-                <div className="jobTime">{j.time}</div><div className="jobMain"><strong>{j.customer}</strong><span>{j.address}</span><small>Job #{j.id}</small></div><div className="chev">›</div>
-              </button>
-            ))}</div>
+            <div className="jobs">{filteredJobs.map((j) => <button key={j.id} className={`jobCard ${job?.id === j.id ? 'selected' : ''}`} onClick={() => setJob(j)}><div className="jobTime">{j.time}</div><div className="jobMain"><strong>{j.customer}</strong><span>{j.address}</span><small>Job #{j.id}</small></div><div className="chev">›</div></button>)}</div>
             <div className="bottomActions"><button className="secondary" onClick={() => setStep(0)}>Back</button><button className="primary" disabled={!job} onClick={() => setStep(2)}>Confirm Job</button></div>
           </section>
         )}
 
         {step === 2 && (
           <section>
-            <p className="eyebrow">2 · Panel setup</p>
-            <h1>Which panel is this?</h1>
+            <p className="eyebrow">2 · Panel setup</p><h1>Which panel is this?</h1>
             <div className="jobBanner"><strong>{job.customer}</strong><span>{job.address}</span><small>Job #{job.id}</small></div>
             <div className="formGrid">
               <label>Panel name<input value={panel.name} onChange={(e) => setPanel({ ...panel, name: e.target.value })} /></label>
@@ -166,47 +229,26 @@ export default function App() {
 
         {step === 3 && (
           <section>
-            <p className="eyebrow">3 · Panel photos</p>
-            <h1>Photograph what the AI needs.</h1>
-            <p className="lead compact">The goal is complete breaker coverage, not a fixed number of pictures. Keep each image square to the panel and make the breaker stickers readable.</p>
-
+            <p className="eyebrow">3 · Panel photos</p><h1>Photograph what the AI needs.</h1>
+            <p className="lead compact">Complete breaker coverage matters more than a fixed photo count. Photos stay on this device until a confirmed upload succeeds.</p>
             <div style={{ display: 'grid', gap: 18 }}>
-              <div className="completionCard" style={{ display: 'grid' }}>
-                <div><strong>1. Full panel overview</strong><span>One photo from far enough back to show the whole open panel.</span></div>
-                {overview ? <PhotoTile file={overview} label="Overview" onRemove={() => setOverview(null)} /> : <AddPhotoButton onFiles={(files) => setOverview(files[0] || null)}>Take overview photo</AddPhotoButton>}
-              </div>
-
-              <div className="completionCard" style={{ display: 'grid' }}>
-                <div><strong>2. Left-side breakers</strong><span>Take as many close-ups as needed from top to bottom. Overlap slightly so nothing is missed.</span></div>
-                {leftPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 }}>{leftPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} label={`Left ${i + 1}`} onRemove={() => setLeftPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}
-                <AddPhotoButton multiple onFiles={(files) => setLeftPhotos((p) => [...p, ...files])}>+ Add left breaker photo</AddPhotoButton>
-              </div>
-
-              <div className="completionCard" style={{ display: 'grid' }}>
-                <div><strong>3. Right-side breakers</strong><span>Take as many close-ups as needed from top to bottom. Make sure labels beside the breakers are readable.</span></div>
-                {rightPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 }}>{rightPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} label={`Right ${i + 1}`} onRemove={() => setRightPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}
-                <AddPhotoButton multiple onFiles={(files) => setRightPhotos((p) => [...p, ...files])}>+ Add right breaker photo</AddPhotoButton>
-              </div>
-
-              <div className="completionCard" style={{ display: 'grid' }}>
-                <div><strong>4. Existing panel label</strong><span>Optional. Add it only if there is an existing directory worth capturing.</span></div>
-                {directory ? <PhotoTile file={directory} label="Existing label" onRemove={() => setDirectory(null)} /> : <AddPhotoButton onFiles={(files) => setDirectory(files[0] || null)}>Add optional label photo</AddPhotoButton>}
-              </div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>1. Full panel overview</strong><span>One photo showing the whole open panel.</span></div>{overview ? <PhotoTile file={overview} label="Overview" onRemove={() => setOverview(null)} /> : <AddPhotoButton onFiles={(files) => setOverview(files[0] || null)}>Take overview photo</AddPhotoButton>}</div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>2. Left-side breakers</strong><span>Take as many close-ups as needed from top to bottom. Overlap slightly.</span></div>{leftPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 }}>{leftPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} label={`Left ${i + 1}`} onRemove={() => setLeftPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}<AddPhotoButton multiple onFiles={(files) => setLeftPhotos((p) => [...p, ...files])}>+ Add left breaker photo</AddPhotoButton></div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>3. Right-side breakers</strong><span>Take as many close-ups as needed. Make breaker labels readable.</span></div>{rightPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 }}>{rightPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} label={`Right ${i + 1}`} onRemove={() => setRightPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}<AddPhotoButton multiple onFiles={(files) => setRightPhotos((p) => [...p, ...files])}>+ Add right breaker photo</AddPhotoButton></div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>4. Existing panel label</strong><span>Optional.</span></div>{directory ? <PhotoTile file={directory} label="Existing label" onRemove={() => setDirectory(null)} /> : <AddPhotoButton onFiles={(files) => setDirectory(files[0] || null)}>Add optional label photo</AddPhotoButton>}</div>
             </div>
-
-            <div className="tips"><strong>Minimum needed</strong><span>1 overview + at least 1 left-side photo + at least 1 right-side photo. Larger panels can use 2, 3, 4 or more photos per side.</span></div>
+            <div className="tips"><strong>Minimum needed</strong><span>1 overview + at least 1 left-side photo + at least 1 right-side photo. Larger panels can use as many as needed.</span></div>
             <div className="bottomActions"><button className="secondary" onClick={() => setStep(2)}>Back</button><button className="primary" disabled={!complete} onClick={() => setStep(4)}>Review Photos</button></div>
           </section>
         )}
 
         {step === 4 && (
           <section>
-            <p className="eyebrow">4 · Review & process</p>
-            <h1>Ready to build the typed label.</h1>
-            <div className="completionCard"><div className="completionNumber">{capturedCount}</div><div><strong>Photos captured</strong><span>Overview: {overview ? 'yes' : 'no'} · Left: {leftPhotos.length} · Right: {rightPhotos.length} · Existing label: {directory ? 'yes' : 'optional'}</span></div></div>
-            <div className="infoStrip"><strong>Next:</strong> Send the field record to SharePoint, then open the AI verification screen to identify breaker positions, amperages, breaker types and circuit descriptions before the final directory is printed.</div>
-            <div className="bottomActions"><button className="secondary" onClick={() => setStep(3)}>Back</button><button className="primary sendButton" disabled={!complete || sending} onClick={sendToSharePoint}>{sending ? 'Sending…' : 'Send & Build Label'}</button></div>
-            {sendError && <div className="sendError" role="alert"><strong>Could not send</strong><span>{sendError}</span><button type="button" onClick={sendToSharePoint}>Try again</button></div>}
+            <p className="eyebrow">4 · Save & process</p><h1>{online ? 'Ready to upload.' : 'Ready to save offline.'}</h1>
+            <div className="completionCard"><div className="completionNumber">{capturedCount}</div><div><strong>Photos captured</strong><span>Overview: yes · Left: {leftPhotos.length} · Right: {rightPhotos.length} · Existing label: {directory ? 'yes' : 'optional'}</span></div></div>
+            <div className="infoStrip"><strong>{online ? 'Online:' : 'Offline:'}</strong> {online ? 'The app saves locally first, uploads to SharePoint, then clears the local photo blobs only after the server confirms success.' : 'The full panel record and photos will remain on this phone and automatically upload when service returns.'}</div>
+            <div className="bottomActions"><button className="secondary" onClick={() => setStep(3)}>Back</button><button className="primary sendButton" disabled={!complete || sending} onClick={saveAndSend}>{sending ? 'Saving…' : online ? 'Save, Upload & Build Label' : 'Save Offline'}</button></div>
+            {sendError && <div className="sendError" role="alert"><strong>Panel remains saved locally</strong><span>{sendError}</span><button type="button" onClick={saveAndSend}>Try again</button></div>}
           </section>
         )}
       </main>

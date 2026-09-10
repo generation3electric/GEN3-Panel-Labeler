@@ -5,6 +5,12 @@ import ProcessingReview from './ProcessingReview.jsx';
 import PastRecords from './PastRecords.jsx';
 import './styles.css';
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error) => console.warn('Offline service worker registration failed:', error));
+  });
+}
+
 const pathname = window.location.pathname;
 const processingPreview = pathname === '/processing-preview';
 const pastRecords = pathname === '/past-records';
