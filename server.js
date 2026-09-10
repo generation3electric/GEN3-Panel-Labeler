@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { analyzePanelPhotos, openAIConfigured } from './aiPanel.js';
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 20 } });
@@ -35,16 +36,8 @@ async function getAccessToken() {
 }
 async function getServiceTitanAccessToken() {
   if (!serviceTitanConfigured()) throw new Error('ServiceTitan is not configured on Railway.');
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: process.env.SERVICETITAN_CLIENT_ID,
-    client_secret: process.env.SERVICETITAN_CLIENT_SECRET,
-  });
-  const response = await fetch(SERVICETITAN_AUTH_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
-  });
+  const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: process.env.SERVICETITAN_CLIENT_ID, client_secret: process.env.SERVICETITAN_CLIENT_SECRET });
+  const response = await fetch(SERVICETITAN_AUTH_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
   const text = await response.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
@@ -60,21 +53,14 @@ async function serviceTitan(pathname, options = {}) {
   const response = await fetch(`${SERVICETITAN_API_URL}${pathname}`, {
     ...options,
     token: undefined,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'ST-App-Key': process.env.SERVICETITAN_APP_KEY,
-      Accept: 'application/json',
-      ...options.headers,
-    },
+    headers: { Authorization: `Bearer ${token}`, 'ST-App-Key': process.env.SERVICETITAN_APP_KEY, Accept: 'application/json', ...options.headers },
   });
   const text = await response.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text ? { raw: text } : null; }
   if (!response.ok) {
     const error = new Error(data?.message || data?.error?.message || data?.title || `ServiceTitan returned ${response.status}.`);
-    error.status = response.status;
-    error.details = data;
-    throw error;
+    error.status = response.status; error.details = data; throw error;
   }
   return data;
 }
@@ -110,6 +96,7 @@ async function uploadFile(token, driveId, folderId, filename, buffer) {
 }
 
 app.get('/api/sharepoint/status', (_req, res) => res.json({ configured: microsoftConfigured() }));
+app.get('/api/ai/status', (_req, res) => res.json({ configured: openAIConfigured(), model: process.env.OPENAI_PANEL_MODEL || 'gpt-5.6-terra' }));
 app.get('/api/servicetitan/status', async (_req, res) => {
   if (!serviceTitanConfigured()) return res.status(503).json({ configured: false, authenticated: false, error: 'ServiceTitan variables are missing.' });
   try {
@@ -144,19 +131,10 @@ app.get('/api/sharepoint/panel-records', async (req, res) => {
       const fields = {};
       for (const [key, value] of Object.entries(item.fields || {})) fields[displayByInternal[key] || key] = value;
       return {
-        id: item.id,
-        title: fields.Title || '',
-        jobNumber: fields['ServiceTitan Job Number'] || '',
-        serviceTitanId: fields['ServiceTitan Job ID'] || '',
-        recordId: fields['Panel Record ID'] || '',
-        panelName: fields['Panel Name'] || '',
-        address: fields['Service Address'] || '',
-        status: fields['Record Status'] || '',
-        folderUrl: fields['Folder Link'] || '',
-        capturedPhotos: fields['Captured Photos'] ?? null,
-        skippedPhotos: fields['Skipped Photos'] ?? null,
-        capturedBy: fields['Captured By'] || '',
-        capturedAt: fields['Captured At'] || item.createdDateTime || '',
+        id: item.id, title: fields.Title || '', jobNumber: fields['ServiceTitan Job Number'] || '', serviceTitanId: fields['ServiceTitan Job ID'] || '',
+        recordId: fields['Panel Record ID'] || '', panelName: fields['Panel Name'] || '', address: fields['Service Address'] || '', status: fields['Record Status'] || '',
+        folderUrl: fields['Folder Link'] || '', capturedPhotos: fields['Captured Photos'] ?? null, skippedPhotos: fields['Skipped Photos'] ?? null,
+        capturedBy: fields['Captured By'] || '', capturedAt: fields['Captured At'] || item.createdDateTime || '',
       };
     }).sort((a, b) => String(b.capturedAt).localeCompare(String(a.capturedAt)));
     const q = String(req.query.q || '').trim().toLowerCase();
@@ -170,9 +148,12 @@ app.get('/api/sharepoint/panel-records', async (req, res) => {
 
 app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req, res) => {
   if (!microsoftConfigured()) return res.status(503).json({ error: 'The Microsoft connection has not been configured on Railway yet.' });
+  if (!openAIConfigured()) return res.status(503).json({ error: 'AI processing is not configured yet. Add OPENAI_API_KEY in Railway, then retry. The panel should remain saved locally.', code: 'OPENAI_NOT_CONFIGURED' });
   try {
     const record = JSON.parse(req.body.record || '{}');
     if (!record.job?.id || !record.panel?.name || !record.recordId) return res.status(400).json({ error: 'Job, panel name, and record ID are required.' });
+    if (!(req.files || []).length) return res.status(400).json({ error: 'At least one panel photo is required.' });
+
     const token = await getAccessToken();
     const site = await graph(token, `/sites/${SHAREPOINT_HOSTNAME}:${SHAREPOINT_SITE_PATH}`);
     const drives = await graph(token, `/sites/${site.id}/drives`);
@@ -181,6 +162,7 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
     const lists = await graph(token, `/sites/${site.id}/lists?$select=id,displayName`);
     const list = lists.value.find((item) => item.displayName === SHAREPOINT_LIST);
     if (!list) throw new Error(`SharePoint list “${SHAREPOINT_LIST}” was not found.`);
+
     const year = String(new Date(record.capturedAt).getFullYear());
     const yearFolder = await ensureFolder(token, drive.id, null, year);
     const jobFolder = await ensureFolder(token, drive.id, yearFolder.id, `Job ${safeName(record.job.id)}`);
@@ -190,11 +172,22 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
       const result = await uploadFile(token, drive.id, panelFolder.id, safeName(file.originalname, 'panel-photo.jpg'), file.buffer);
       uploaded.push({ name: result.name, webUrl: result.webUrl });
     }
-    const metadata = { ...record, uploadedPhotos: uploaded };
+
+    // Analyze while the in-memory photo buffers are still available. If AI fails, the client keeps its local copy and can retry.
+    const ai = await analyzePanelPhotos({ files: req.files || [], record });
+    const metadata = { ...record, uploadedPhotos: uploaded, ai };
     await uploadFile(token, drive.id, panelFolder.id, `${safeName(record.recordId)}-record.json`, Buffer.from(JSON.stringify(metadata, null, 2)));
+    await uploadFile(token, drive.id, panelFolder.id, `${safeName(record.recordId)}-ai-analysis.json`, Buffer.from(JSON.stringify(ai, null, 2)));
+
     const columns = await graph(token, `/sites/${site.id}/lists/${list.id}/columns?$select=name,displayName`);
     const internalName = (displayName) => columns.value.find((column) => column.displayName === displayName)?.name;
-    const values = { Title: `${record.job.id} — ${record.panel.name}`, 'ServiceTitan Job Number': String(record.job.id), 'ServiceTitan Job ID': String(record.job.serviceTitanId || record.job.id), 'Panel Record ID': record.recordId, 'Panel Name': record.panel.name, 'Service Address': record.job.address, 'Record Status': 'Saved to SharePoint', 'Job Note Status': 'Pending ServiceTitan connection', 'Folder Link': panelFolder.webUrl, 'Captured Photos': record.capturedCount, 'Skipped Photos': record.skippedCount, 'Captured By': record.capturedBy || '', 'Captured At': record.capturedAt };
+    const values = {
+      Title: `${record.job.id} — ${record.panel.name}`,
+      'ServiceTitan Job Number': String(record.job.id), 'ServiceTitan Job ID': String(record.job.serviceTitanId || record.job.id), 'Panel Record ID': record.recordId,
+      'Panel Name': record.panel.name, 'Service Address': record.job.address, 'Record Status': 'AI processed — needs verification',
+      'Job Note Status': 'Pending ServiceTitan connection', 'Folder Link': panelFolder.webUrl, 'Captured Photos': record.capturedCount,
+      'Skipped Photos': record.skippedCount, 'Captured By': record.capturedBy || '', 'Captured At': record.capturedAt,
+    };
     const item = await graph(token, `/sites/${site.id}/lists/${list.id}/items`, { method: 'POST', body: JSON.stringify({ fields: { Title: values.Title } }) });
     const indexWarnings = [];
     for (const [displayName, value] of Object.entries(values)) {
@@ -203,10 +196,13 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
       try { await graph(token, `/sites/${site.id}/lists/${list.id}/items/${item.id}/fields`, { method: 'PATCH', body: JSON.stringify({ [name]: value }) }); }
       catch (error) { indexWarnings.push(`${displayName}: ${error.message}`); console.warn('SharePoint index field skipped:', { displayName, internalName: name, status: error.status, code: error.code, pathname: error.pathname, message: error.message }); }
     }
-    res.status(201).json({ recordId: record.recordId, folderUrl: panelFolder.webUrl, listItemId: item.id, uploadedCount: uploaded.length, indexWarnings });
+    res.status(201).json({
+      recordId: record.recordId, folderUrl: panelFolder.webUrl, listItemId: item.id, uploadedCount: uploaded.length, indexWarnings,
+      aiAnalysis: ai.analysis, aiModel: ai.model, aiResponseId: ai.responseId,
+    });
   } catch (error) {
-    console.error('SharePoint send failed:', { message: error.message, status: error.status, code: error.code, pathname: error.pathname, details: error.details, stack: error.stack });
-    res.status(error.status || 500).json({ error: error.message || 'The panel record could not be sent.' });
+    console.error('Panel upload/AI processing failed:', { message: error.message, status: error.status, code: error.code, pathname: error.pathname, details: error.details, stack: error.stack });
+    res.status(error.status || 500).json({ error: error.message || 'The panel record could not be processed.', code: error.code || null });
   }
 });
 
