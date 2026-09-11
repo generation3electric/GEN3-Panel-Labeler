@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import './ProcessingReview.css';
+import { buildRowsFromAnalysis, getAIAnalysis } from './panelAnalysis.js';
 
 const commonCircuits = [
   'Kitchen','Kitchen Receptacles','Kitchen Lighting','Kitchen Counter','Dining Room','Dining Room Lights','Living Room','Living Room Lights',
@@ -10,47 +11,21 @@ const commonCircuits = [
 ];
 
 const breakerKinds = [
+  { value: '1p_unknown', label: '1P Verify Type', poles: 1, family: 'standard' },
+  { value: '2p_unknown', label: '2P Verify Type', poles: 2, family: 'standard' },
   { value: '1p_standard', label: '1P Standard', poles: 1, family: 'standard' },
   { value: '2p_standard', label: '2P Standard', poles: 2, family: 'standard' },
   { value: '1p_afci', label: '1P AFCI', poles: 1, family: 'afci' },
+  { value: '2p_afci', label: '2P AFCI', poles: 2, family: 'afci' },
   { value: '1p_gfci', label: '1P GFCI', poles: 1, family: 'gfci' },
   { value: '2p_gfci', label: '2P GFCI', poles: 2, family: 'gfci' },
   { value: '1p_dual', label: '1P Dual Function', poles: 1, family: 'dual' },
+  { value: '2p_dual', label: '2P Dual Function', poles: 2, family: 'dual' },
   { value: '1p_surge', label: '1P Surge', poles: 1, family: 'surge' },
   { value: '2p_surge', label: '2P Surge', poles: 2, family: 'surge' },
 ];
 
 const kindByValue = Object.fromEntries(breakerKinds.map((kind) => [kind.value, kind]));
-
-function buildRows(spaces) {
-  const count = Math.max(12, Math.min(Number(spaces) || 30, 42));
-  const result = Array.from({ length: count }, (_, index) => ({
-    circuit: index + 1,
-    amps: [15,20,20,20,15,20,15,15,20,20,15,20][index % 12],
-    breakerKind: index === 4 ? '1p_afci' : index === 9 ? '1p_gfci' : '1p_standard',
-    description: index % 3 === 0 ? '' : commonCircuits[index % 18],
-    confidence: index % 7 === 0 ? 'Review' : 'High',
-    continuationOf: null,
-  }));
-
-  const makeTwoPole = (circuit, amps, description, breakerKind = '2p_standard') => {
-    const first = result.find((r) => r.circuit === circuit);
-    const second = result.find((r) => r.circuit === circuit + 2);
-    if (!first || !second) return;
-    first.amps = amps;
-    first.description = description;
-    first.breakerKind = breakerKind;
-    second.continuationOf = circuit;
-    second.amps = amps;
-    second.description = description;
-    second.breakerKind = breakerKind;
-    second.confidence = first.confidence;
-  };
-
-  if (count >= 26) makeTwoPole(24, 50, 'Range');
-  if (count >= 27) makeTwoPole(25, 30, 'Dryer');
-  return result;
-}
 
 function breakerFamily(row) {
   return kindByValue[row.breakerKind]?.family || 'standard';
@@ -65,14 +40,18 @@ function descriptionFontSize(text) {
 }
 
 export default function ProcessingReview({ job, panel, photoUrls, savedRecord, onStartOver }) {
-  const [phase, setPhase] = useState('ready');
-  const initialRows = useMemo(() => buildRows(panel.spaces), [panel.spaces]);
-  const [rows, setRows] = useState(initialRows);
+  const analysis = useMemo(() => getAIAnalysis(savedRecord), [savedRecord]);
+  const normalized = useMemo(() => buildRowsFromAnalysis(panel, analysis), [panel, analysis]);
+  const [phase, setPhase] = useState(() => (analysis ? 'review' : 'ready'));
+  const [rows, setRows] = useState(normalized.rows);
   const [labelQueries, setLabelQueries] = useState({});
+  const analysisWarnings = [...(Array.isArray(analysis?.warnings) ? analysis.warnings : []), ...normalized.warnings];
+  const analyzedPanel = analysis?.panel || {};
+  const panelManufacturer = panel.manufacturer && panel.manufacturer !== 'Unknown' ? panel.manufacturer : analyzedPanel.manufacturer || 'Verify';
+  const panelMainAmps = panel.mainAmps || analyzedPanel.mainAmps || null;
 
   function runPreview() {
-    setPhase('processing');
-    window.setTimeout(() => setPhase('review'), 700);
+    setPhase('review');
   }
 
   function updateCircuit(circuit, key, value) {
@@ -120,7 +99,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     const row = byCircuit[circuit];
     if (!row || row.continuationOf) return null;
 
-    const kind = kindByValue[row.breakerKind] || kindByValue['1p_standard'];
+    const kind = kindByValue[row.breakerKind] || kindByValue['1p_unknown'];
     const rowIndex = side === 'left' ? Math.ceil(circuit / 2) : circuit / 2;
     const rowSpan = kind.poles === 2 ? 2 : 1;
     const query = labelQueries[row.circuit] || '';
@@ -128,7 +107,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
     return (
       <React.Fragment key={`${side}-${circuit}`}>
-        <div className={`panelDescription ${side} ${row.confidence === 'Review' ? 'needsReview' : ''}`} style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }}>
+        <div className={`panelDescription ${side} ${row.confidence === 'Review' ? 'needsReview' : ''}`} style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }} title={row.notes ? `AI note: ${row.notes}` : undefined}>
           <span className="circuitNumber">{circuit}</span>
           <textarea
             className="circuitDescriptionInput"
@@ -160,14 +139,15 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             </details>
             <span>{row.description.length}/280</span>
           </div>
-          {row.confidence === 'Review' && <span className="reviewFlag">Needs review</span>}
+          {row.confidence === 'Review' && <span className="reviewFlag" title={row.notes || undefined}>{row.notes ? 'Review AI note' : 'Needs review'}</span>}
         </div>
         <div
           className={`breakerTile ${side} family-${kind.family} ${row.confidence === 'Review' ? 'needsReview' : ''} ${kind.poles === 2 ? 'twoPole' : ''}`}
           style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }}
         >
-          <select className="ampSelect" value={row.amps} onChange={(e) => updateCircuit(row.circuit, 'amps', e.target.value)} aria-label={`Circuit ${row.circuit} amps`}>
-            {[15,20,25,30,40,50,60,70,80,90,100,125,150,175,200].map((amp) => <option key={amp} value={amp}>{amp}A</option>)}
+          <select className="ampSelect" value={row.amps ?? ''} onChange={(e) => updateCircuit(row.circuit, 'amps', e.target.value ? Number(e.target.value) : null)} aria-label={`Circuit ${row.circuit} amps`}>
+            <option value="">Verify amps</option>
+            {[...new Set([15,20,25,30,40,50,60,70,80,90,100,125,150,175,200, row.amps].filter(Boolean))].sort((a, b) => a - b).map((amp) => <option key={amp} value={amp}>{amp}A</option>)}
           </select>
           <select className="breakerKindSelect" value={row.breakerKind} onChange={(e) => changeBreakerKind(row.circuit, e.target.value)} aria-label={`Circuit ${row.circuit} breaker type`}>
             {breakerKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
@@ -200,7 +180,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           <div><span>Generated directory</span><strong>{panel.name}</strong><small>{job.address}</small></div>
           {photoUrls?.breakerField ? <img src={photoUrls.breakerField} alt="Panel" /> : <div className="photoPlaceholder">Panel photo</div>}
         </div>
-        <div className="directoryPreviewMeta"><b>Job #{job.id}</b><b>{panel.mainAmps ? `${panel.mainAmps}A Main` : 'Main: verify'}</b></div>
+        <div className="directoryPreviewMeta"><b>Job #{job.id}</b><b>{panelMainAmps ? `${panelMainAmps}A Main` : 'Main: verify'}</b></div>
         <div className="directoryRows">
           {Array.from({ length: physicalRows }, (_, i) => {
             const left = byCircuit[i * 2 + 1];
@@ -210,10 +190,10 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             return (
               <div className="directoryPreviewRow" key={i}>
                 <span>{left ? left.circuit : ''}</span>
-                <div className={`miniBreaker ${leftSource ? `family-${breakerFamily(leftSource)}` : ''}`}>{leftSource ? `${leftSource.amps}A` : ''}</div>
+                <div className={`miniBreaker ${leftSource ? `family-${breakerFamily(leftSource)}` : ''}`}>{leftSource?.amps ? `${leftSource.amps}A` : 'Verify'}</div>
                 <div className="miniDescription leftText">{left?.continuationOf ? '↳' : leftSource?.description || 'Unlabeled'}</div>
                 <div className="miniDescription rightText">{right?.continuationOf ? '↳' : rightSource?.description || 'Unlabeled'}</div>
-                <div className={`miniBreaker ${rightSource ? `family-${breakerFamily(rightSource)}` : ''}`}>{rightSource ? `${rightSource.amps}A` : ''}</div>
+                <div className={`miniBreaker ${rightSource ? `family-${breakerFamily(rightSource)}` : ''}`}>{rightSource?.amps ? `${rightSource.amps}A` : 'Verify'}</div>
                 <span>{right ? right.circuit : ''}</span>
               </div>
             );
@@ -223,13 +203,13 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     );
   }
 
-  if (phase === 'ready' || phase === 'processing') {
+  if (phase === 'ready') {
     return (
       <main className="content processPage">
         <p className="eyebrow">Panel processing</p>
-        <h1>Turn the field record into a finished directory.</h1>
-        <p className="lead">The review screen mirrors the physical panel without stacking controls on top of each other.</p>
-        <button className="primary large" onClick={runPreview} disabled={phase === 'processing'}>{phase === 'processing' ? 'Processing photos…' : 'Process Panel Photos'}</button>
+        <h1>AI results are not available for this panel.</h1>
+        <p className="lead">The server did not return an analysis result. You can still open a blank verification screen, but every circuit will be marked for review.</p>
+        <button className="primary large" onClick={runPreview}>Open Blank Verification</button>
         {savedRecord?.folderUrl && <a className="sharePointLink" href={savedRecord.folderUrl} target="_blank" rel="noreferrer">Open source photos in SharePoint</a>}
       </main>
     );
@@ -244,7 +224,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           <div className="directoryMeta">
             <div><span>Customer</span><strong>{job.customer}</strong></div><div><span>Job</span><strong>#{job.id}</strong></div>
             <div><span>Address</span><strong>{job.address}</strong></div><div><span>Panel</span><strong>{panel.name}</strong></div>
-            <div><span>Manufacturer</span><strong>{panel.manufacturer}</strong></div><div><span>Main</span><strong>{panel.mainAmps ? `${panel.mainAmps} A` : 'Verify'}</strong></div>
+            <div><span>Manufacturer</span><strong>{panelManufacturer}</strong></div><div><span>Main</span><strong>{panelMainAmps ? `${panelMainAmps} A` : 'Verify'}</strong></div>
           </div>
           {DirectoryPreview()}
           <div className="directoryFooter">Verified panel directory · GEN3 Electric & HVAC · {new Date().toLocaleDateString()}</div>
@@ -258,9 +238,15 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   return (
     <main className="content processPage panelReviewPage">
-      <p className="eyebrow">AI review preview</p>
+      <p className="eyebrow">AI verification</p>
       <h1>Verify the panel the way it is physically laid out.</h1>
-      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Type anything you need, or add several common labels to build a description quickly.</span></div>
+      <div className="analysisSummary">
+        <strong>AI result loaded</strong>
+        <span>{panelManufacturer} · {panelMainAmps ? `${panelMainAmps}A main` : 'main amps need verification'} · {rows.length} spaces{Number.isFinite(Number(analyzedPanel.confidence)) ? ` · ${Math.round(Number(analyzedPanel.confidence) * 100)}% panel confidence` : ''}</span>
+        {savedRecord?.aiModel && <small>Analyzed by {savedRecord.aiModel}</small>}
+      </div>
+      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Yellow items are low-confidence, incomplete, or missing from the AI reading. Correct them before generating the directory.</span></div>
+      {analysisWarnings.length > 0 && <div className="analysisWarnings"><strong>AI warnings</strong><ul>{analysisWarnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></div>}
       <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
       {PhysicalPanel()}
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
