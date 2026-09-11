@@ -7,11 +7,12 @@ test('splitLocalPanels groups pending and uploaded panels newest first', () => {
     { recordId: 'old-upload', status: 'uploaded', uploadedAt: '2026-09-09T12:00:00Z' },
     { recordId: 'new-pending', status: 'pending', savedLocallyAt: '2026-09-11T12:00:00Z' },
     { recordId: 'new-upload', status: 'uploaded', uploadedAt: '2026-09-11T13:00:00Z' },
+    { recordId: 'finalized', status: 'finalized', finalizedAt: '2026-09-11T14:00:00Z' },
     { recordId: 'old-pending', status: 'pending', savedLocallyAt: '2026-09-10T12:00:00Z' },
   ]);
 
   assert.deepEqual(result.pending.map((item) => item.recordId), ['new-pending', 'old-pending']);
-  assert.deepEqual(result.uploaded.map((item) => item.recordId), ['new-upload', 'old-upload']);
+  assert.deepEqual(result.uploaded.map((item) => item.recordId), ['finalized', 'new-upload', 'old-upload']);
 });
 
 test('records without an uploaded status remain pending', () => {

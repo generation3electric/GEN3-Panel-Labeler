@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
 import UploadActivity from './UploadActivity.jsx';
-import { getAllLocalPanels, getPendingPanels, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
+import { getAllLocalPanels, getPendingPanels, markPanelFinalized, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
 
 const JOB_CACHE_PREFIX = 'gen3-panel-jobs:';
 
@@ -96,7 +96,7 @@ export default function App() {
     try {
       const items = await getAllLocalPanels();
       setLocalPanels(items);
-      setPendingCount(items.filter((item) => item.status !== 'uploaded').length);
+      setPendingCount(items.filter((item) => item.status !== 'uploaded' && item.status !== 'finalized').length);
     } catch (error) {
       console.warn('Could not read offline queue', error);
     }
@@ -245,11 +245,18 @@ export default function App() {
     reviewUploadedPanel({ ...item, status: 'uploaded', uploadedAt: new Date().toISOString(), receipt: result });
   }
 
+  async function rememberFinalization(finalization) {
+    if (!finalization?.recordId) return;
+    await markPanelFinalized(finalization.recordId, finalization);
+    setSavedRecord((current) => ({ ...(current || {}), finalization }));
+    await refreshLocalPanels();
+  }
+
   if (processing) {
     return (
       <div className="appShell">
         <Header step={4} onHome={reset} onUploads={() => { setProcessing(false); setActivityOpen(true); refreshLocalPanels(); }} online={online} pendingCount={pendingCount} syncing={syncing} />
-        <ProcessingReview job={job} panel={panel} photoUrls={processingPhotoUrls} savedRecord={savedRecord} onStartOver={reset} />
+        <ProcessingReview job={job} panel={panel} photoUrls={processingPhotoUrls} savedRecord={savedRecord} onFinalized={rememberFinalization} onStartOver={reset} />
       </div>
     );
   }

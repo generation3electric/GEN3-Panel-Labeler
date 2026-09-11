@@ -72,6 +72,24 @@ export async function markPanelUploaded(recordId, receipt = {}) {
   });
 }
 
+export async function markPanelFinalized(recordId, finalization = {}) {
+  const db = await openDb();
+  const tx = db.transaction(STORE, 'readwrite');
+  const store = tx.objectStore(STORE);
+  const item = await requestResult(store.get(recordId));
+  if (!item) return;
+  store.put({
+    ...item,
+    status: 'finalized',
+    finalizedAt: finalization.verifiedAt || new Date().toISOString(),
+    receipt: { ...(item.receipt || {}), finalization },
+  });
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function getAllLocalPanels() {
   const db = await openDb();
   const tx = db.transaction(STORE, 'readonly');
@@ -80,7 +98,7 @@ export async function getAllLocalPanels() {
 
 export async function getPendingPanels() {
   const items = await getAllLocalPanels();
-  return items.filter((item) => item.status !== 'uploaded');
+  return items.filter((item) => item.status !== 'uploaded' && item.status !== 'finalized');
 }
 
 export async function getPendingCount() {
@@ -90,13 +108,13 @@ export async function getPendingCount() {
 
 export function splitLocalPanels(items = []) {
   const sorted = [...items].sort((a, b) => {
-    const aDate = a.uploadedAt || a.savedLocallyAt || a.record?.capturedAt || '';
-    const bDate = b.uploadedAt || b.savedLocallyAt || b.record?.capturedAt || '';
+    const aDate = a.finalizedAt || a.uploadedAt || a.savedLocallyAt || a.record?.capturedAt || '';
+    const bDate = b.finalizedAt || b.uploadedAt || b.savedLocallyAt || b.record?.capturedAt || '';
     return String(bDate).localeCompare(String(aDate));
   });
   return {
-    pending: sorted.filter((item) => item.status !== 'uploaded'),
-    uploaded: sorted.filter((item) => item.status === 'uploaded'),
+    pending: sorted.filter((item) => item.status !== 'uploaded' && item.status !== 'finalized'),
+    uploaded: sorted.filter((item) => item.status === 'uploaded' || item.status === 'finalized'),
   };
 }
 

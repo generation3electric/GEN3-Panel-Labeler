@@ -39,12 +39,17 @@ function descriptionFontSize(text) {
   return '13px';
 }
 
-export default function ProcessingReview({ job, panel, photoUrls, savedRecord, onStartOver }) {
+export default function ProcessingReview({ job, panel, photoUrls, savedRecord, onFinalized, onStartOver }) {
   const analysis = useMemo(() => getAIAnalysis(savedRecord), [savedRecord]);
   const normalized = useMemo(() => buildRowsFromAnalysis(panel, analysis), [panel, analysis]);
-  const [phase, setPhase] = useState(() => (analysis ? 'review' : 'ready'));
-  const [rows, setRows] = useState(normalized.rows);
+  const previousFinalization = savedRecord?.finalization || savedRecord?.receipt?.finalization || null;
+  const [phase, setPhase] = useState(() => (previousFinalization ? 'final' : analysis ? 'review' : 'ready'));
+  const [rows, setRows] = useState(() => previousFinalization?.rows || normalized.rows);
   const [labelQueries, setLabelQueries] = useState({});
+  const [verifierName, setVerifierName] = useState(() => previousFinalization?.verifiedBy || localStorage.getItem('gen3-panel-verifier-name') || '');
+  const [finalizing, setFinalizing] = useState(false);
+  const [finalizeError, setFinalizeError] = useState('');
+  const [finalReceipt, setFinalReceipt] = useState(previousFinalization);
   const analysisWarnings = [...(Array.isArray(analysis?.warnings) ? analysis.warnings : []), ...normalized.warnings];
   const analyzedPanel = analysis?.panel || {};
   const panelManufacturer = panel.manufacturer && panel.manufacturer !== 'Unknown' ? panel.manufacturer : analyzedPanel.manufacturer || 'Verify';
@@ -52,6 +57,45 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   function runPreview() {
     setPhase('review');
+  }
+
+  async function finalizeDirectory() {
+    const verifiedBy = verifierName.trim();
+    if (!verifiedBy) {
+      setFinalizeError('Enter the name of the person who verified the directory.');
+      return;
+    }
+    setFinalizing(true);
+    setFinalizeError('');
+    const receipt = savedRecord?.receipt || savedRecord || {};
+    try {
+      const response = await fetch('/api/sharepoint/panel-records/finalize', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          recordId: receipt.recordId,
+          listItemId: receipt.listItemId,
+          driveId: receipt.driveId,
+          folderId: receipt.folderId,
+          folderUrl: receipt.folderUrl,
+          verifiedBy,
+          job,
+          panel: { ...panel, manufacturer: panelManufacturer, mainAmps: panelMainAmps },
+          rows,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'The final directory could not be saved.');
+      const saved = { ...result, rows };
+      localStorage.setItem('gen3-panel-verifier-name', verifiedBy);
+      setFinalReceipt(saved);
+      setPhase('final');
+      if (onFinalized) await onFinalized(saved);
+    } catch (error) {
+      setFinalizeError(error.message || 'The final directory could not be saved.');
+    } finally {
+      setFinalizing(false);
+    }
   }
 
   function updateCircuit(circuit, key, value) {
@@ -227,9 +271,11 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             <div><span>Manufacturer</span><strong>{panelManufacturer}</strong></div><div><span>Main</span><strong>{panelMainAmps ? `${panelMainAmps} A` : 'Verify'}</strong></div>
           </div>
           {DirectoryPreview()}
-          <div className="directoryFooter">Verified panel directory · GEN3 Electric & HVAC · {new Date().toLocaleDateString()}</div>
+          <div className="directoryFooter">Verified by {finalReceipt?.verifiedBy || verifierName} · GEN3 Electric & HVAC · {finalReceipt?.verifiedAt ? new Date(finalReceipt.verifiedAt).toLocaleDateString() : new Date().toLocaleDateString()}</div>
         </section>
-        <div className="finalActions noPrint"><button className="secondary" onClick={() => setPhase('review')}>Back to Review</button><button className="primary" onClick={() => window.print()}>Print / Save PDF</button></div>
+        {finalReceipt && <div className="finalSaved noPrint"><strong>Saved to SharePoint</strong><span>The corrected directory, verification details, and final PDF are now part of this panel’s permanent record.</span>{finalReceipt.indexWarnings?.length > 0 && <small>Files were saved. Some optional SharePoint index columns are not set up yet.</small>}</div>}
+        <div className="finalActions noPrint"><button className="secondary" onClick={() => setPhase('review')}>Back to Review</button>{finalReceipt?.finalPdfUrl ? <a className="primary" href={finalReceipt.finalPdfUrl} target="_blank" rel="noreferrer">Open Saved PDF</a> : <button className="primary" onClick={() => window.print()}>Print Copy</button>}</div>
+        <button className="secondary noPrint printCopyButton" onClick={() => window.print()}>Print Another Copy</button>
         <div className="nextProcessCard noPrint"><span>Next process</span><strong>Panel Load Calculation</strong><p>Use the verified breakers, appliance circuits and service size as the starting point for the load-calculation workflow.</p></div>
         <button className="secondary noPrint" onClick={onStartOver}>Start Another Panel</button>
       </main>
@@ -251,7 +297,12 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       {PhysicalPanel()}
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
       {DirectoryPreview()}
-      <div className="reviewActions"><button className="secondary" onClick={() => setPhase('ready')}>Back</button><button className="primary" onClick={() => setPhase('final')}>Generate Final Directory</button></div>
+      <section className="verificationSaveCard">
+        <label>Verified by<input value={verifierName} maxLength={120} autoComplete="name" onChange={(event) => setVerifierName(event.target.value)} placeholder="Technician or reviewer name" /></label>
+        <p>This name and the corrected breaker directory will be saved with the final PDF in SharePoint.</p>
+        {finalizeError && <div className="finalizeError" role="alert">{finalizeError}</div>}
+      </section>
+      <div className="reviewActions"><button className="secondary" onClick={() => setPhase('ready')}>Back</button><button className="primary" disabled={finalizing} onClick={finalizeDirectory}>{finalizing ? 'Saving to SharePoint…' : 'Generate & Save Final Directory'}</button></div>
       <div className="nextProcessCard"><span>Planned next step</span><strong>Load Calculation</strong><p>The verified breaker map becomes the electrical inventory for the load calculation, reducing duplicate entry.</p></div>
     </main>
   );

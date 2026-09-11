@@ -67,10 +67,12 @@ export default function PastRecords() {
                   <span><b>Record</b>{record.recordId || '—'}</span>
                   <span><b>Photos</b>{record.capturedPhotos ?? '—'} captured{record.skippedPhotos ? ` · ${record.skippedPhotos} skipped` : ''}</span>
                   <span><b>Status</b>{record.status || 'Saved'}</span>
+                  {record.verifiedBy && <span><b>Verified by</b>{record.verifiedBy}{record.verifiedAt ? ` · ${formatDate(record.verifiedAt)}` : ''}</span>}
                 </div>
               </div>
               <div className="historyActions">
-                {record.folderUrl ? <a className="primary historyOpen" href={record.folderUrl} target="_blank" rel="noreferrer">Open Photos</a> : <button className="secondary" disabled>No folder link</button>}
+                {record.finalPdfUrl && <a className="primary historyOpen" href={record.finalPdfUrl} target="_blank" rel="noreferrer">Open Final PDF</a>}
+                {record.folderUrl ? <a className={record.finalPdfUrl ? 'secondary historyOpen' : 'primary historyOpen'} href={record.folderUrl} target="_blank" rel="noreferrer">Open Record</a> : <button className="secondary" disabled>No folder link</button>}
               </div>
             </article>
           ))}

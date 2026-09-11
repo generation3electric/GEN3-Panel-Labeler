@@ -14,9 +14,9 @@
     "@vitejs/plugin-react": "latest",
     "express": "^5.1.0",
     "multer": "^2.0.2",
-    "vite": "latest",
+    "pdfkit": "^0.17.2",
     "react": "latest",
-    "react-dom": "latest"
-  },
-  "devDependencies": {}
+    "react-dom": "latest",
+    "vite": "latest"
+  }
 }

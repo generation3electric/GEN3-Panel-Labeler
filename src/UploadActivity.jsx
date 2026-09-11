@@ -12,12 +12,13 @@ function PanelCard({ item, online, busy, onUpload, onReview }) {
   const job = item.record?.job || {};
   const panel = item.record?.panel || {};
   const uploaded = item.status === 'uploaded';
+  const finalized = item.status === 'finalized';
 
   return (
-    <article className={`uploadCard ${uploaded ? 'uploaded' : 'pending'}`}>
+    <article className={`uploadCard ${uploaded || finalized ? 'uploaded' : 'pending'}`}>
       <div className="uploadCardTopline">
-        <span className={`uploadStatus ${uploaded ? 'uploaded' : 'pending'}`}>{uploaded ? 'Ready for review' : 'Pending upload'}</span>
-        <time>{formatDate(uploaded ? item.uploadedAt : item.savedLocallyAt)}</time>
+        <span className={`uploadStatus ${uploaded || finalized ? 'uploaded' : 'pending'}`}>{finalized ? 'Final directory saved' : uploaded ? 'Ready for review' : 'Pending upload'}</span>
+        <time>{formatDate(finalized ? item.finalizedAt : uploaded ? item.uploadedAt : item.savedLocallyAt)}</time>
       </div>
       <h2>{job.address || 'Address not available'}</h2>
       <div className="uploadCardMeta">
@@ -25,8 +26,8 @@ function PanelCard({ item, online, busy, onUpload, onReview }) {
         <span><b>Panel</b>{panel.name || 'Panel'}</span>
         <span><b>Photos</b>{item.record?.capturedCount ?? item.photos?.length ?? '—'}</span>
       </div>
-      {uploaded ? (
-        <button className="primary uploadCardAction" onClick={() => onReview(item)}>Review AI Results <span aria-hidden="true">›</span></button>
+      {uploaded || finalized ? (
+        <button className="primary uploadCardAction" onClick={() => onReview(item)}>{finalized ? 'Open Final Directory' : 'Review AI Results'} <span aria-hidden="true">›</span></button>
       ) : (
         <button className="primary uploadCardAction" disabled={!online || busy} onClick={() => onUpload(item)}>
           {busy ? 'Uploading…' : online ? 'Upload & Review' : 'Waiting for Service'} <span aria-hidden="true">›</span>

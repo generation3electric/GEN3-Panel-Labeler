@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzePanelPhotos, openAIConfigured } from './aiPanel.js';
 import { buildJobChoices, isIsoDate } from './serviceTitanJobs.js';
+import { createFinalDirectoryPdf, normalizeVerifiedDirectory } from './finalDirectory.js';
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 20 } });
@@ -117,6 +118,18 @@ async function uploadFile(token, driveId, folderId, filename, buffer) {
   return graph(token, `/drives/${driveId}/items/${folderId}:/${encodeURIComponent(filename)}:/content`, { method: 'PUT', body: buffer, headers: { 'content-type': 'application/octet-stream' } });
 }
 
+function shareIdFromUrl(url) {
+  return `u!${Buffer.from(String(url)).toString('base64url')}`;
+}
+
+async function resolvePanelFolder(token, { driveId, folderId, folderUrl }) {
+  if (driveId && folderId) return { driveId: String(driveId), folderId: String(folderId), folderUrl: String(folderUrl || '') };
+  if (!folderUrl) throw new Error('The SharePoint panel folder could not be identified. Reopen this panel from Recently Uploaded and try again.');
+  const item = await graph(token, `/shares/${shareIdFromUrl(folderUrl)}/driveItem?$select=id,webUrl,parentReference`);
+  if (!item?.id || !item?.parentReference?.driveId) throw new Error('The SharePoint panel folder could not be resolved.');
+  return { driveId: item.parentReference.driveId, folderId: item.id, folderUrl: item.webUrl || folderUrl };
+}
+
 app.get('/api/sharepoint/status', (_req, res) => res.json({ configured: microsoftConfigured() }));
 app.get('/api/ai/status', (_req, res) => res.json({ configured: openAIConfigured(), model: process.env.OPENAI_PANEL_MODEL || 'gpt-5.6-terra' }));
 app.get('/api/servicetitan/status', async (_req, res) => {
@@ -186,6 +199,7 @@ app.get('/api/sharepoint/panel-records', async (req, res) => {
         recordId: fields['Panel Record ID'] || '', panelName: fields['Panel Name'] || '', address: fields['Service Address'] || '', status: fields['Record Status'] || '',
         folderUrl: fields['Folder Link'] || '', capturedPhotos: fields['Captured Photos'] ?? null, skippedPhotos: fields['Skipped Photos'] ?? null,
         capturedBy: fields['Captured By'] || '', capturedAt: fields['Captured At'] || item.createdDateTime || '',
+        verifiedBy: fields['Verified By'] || '', verifiedAt: fields['Verified At'] || '', finalPdfUrl: fields['Final Directory Link'] || '',
       };
     }).sort((a, b) => String(b.capturedAt).localeCompare(String(a.capturedAt)));
     const q = String(req.query.q || '').trim().toLowerCase();
@@ -248,12 +262,64 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
       catch (error) { indexWarnings.push(`${displayName}: ${error.message}`); console.warn('SharePoint index field skipped:', { displayName, internalName: name, status: error.status, code: error.code, pathname: error.pathname, message: error.message }); }
     }
     res.status(201).json({
-      recordId: record.recordId, folderUrl: panelFolder.webUrl, listItemId: item.id, uploadedCount: uploaded.length, indexWarnings,
+      recordId: record.recordId, folderUrl: panelFolder.webUrl, driveId: drive.id, folderId: panelFolder.id, listItemId: item.id, uploadedCount: uploaded.length, indexWarnings,
       aiAnalysis: ai.analysis, aiModel: ai.model, aiResponseId: ai.responseId,
     });
   } catch (error) {
     console.error('Panel upload/AI processing failed:', { message: error.message, status: error.status, code: error.code, pathname: error.pathname, details: error.details, stack: error.stack });
     res.status(error.status || 500).json({ error: error.message || 'The panel record could not be processed.', code: error.code || null });
+  }
+});
+
+app.post('/api/sharepoint/panel-records/finalize', express.json({ limit: '1mb' }), async (req, res) => {
+  if (!microsoftConfigured()) return res.status(503).json({ error: 'The Microsoft connection has not been configured on Railway yet.' });
+  try {
+    const directory = normalizeVerifiedDirectory(req.body);
+    const token = await getAccessToken();
+    const { site, list } = await getSiteAndList(token);
+    const folder = await resolvePanelFolder(token, req.body || {});
+    const pdf = await createFinalDirectoryPdf(directory);
+    const baseName = safeName(directory.recordId);
+    const jsonFile = await uploadFile(token, folder.driveId, folder.folderId, `${baseName}-verified-directory.json`, Buffer.from(JSON.stringify(directory, null, 2)));
+    const pdfFile = await uploadFile(token, folder.driveId, folder.folderId, `${baseName}-panel-directory.pdf`, pdf);
+
+    const columns = await graph(token, `/sites/${site.id}/lists/${list.id}/columns?$select=name,displayName`);
+    const internalName = (displayName) => columns.value.find((column) => column.displayName === displayName)?.name;
+    const listItemId = String(req.body?.listItemId || '').trim();
+    const indexWarnings = [];
+    if (listItemId) {
+      const values = {
+        'Record Status': 'Verified — final directory saved',
+        'Verified By': directory.verifiedBy,
+        'Verified At': directory.verifiedAt,
+        'Final Directory Link': pdfFile.webUrl,
+      };
+      for (const [displayName, value] of Object.entries(values)) {
+        const name = internalName(displayName);
+        if (!name) {
+          if (displayName !== 'Record Status') indexWarnings.push(`${displayName}: SharePoint index column not present`);
+          continue;
+        }
+        try { await graph(token, `/sites/${site.id}/lists/${list.id}/items/${encodeURIComponent(listItemId)}/fields`, { method: 'PATCH', body: JSON.stringify({ [name]: value }) }); }
+        catch (error) { indexWarnings.push(`${displayName}: ${error.message}`); }
+      }
+    } else {
+      indexWarnings.push('SharePoint index item ID was not available; final files were saved but the list status was not updated.');
+    }
+
+    res.status(201).json({
+      recordId: directory.recordId,
+      verificationStatus: directory.verificationStatus,
+      verifiedBy: directory.verifiedBy,
+      verifiedAt: directory.verifiedAt,
+      folderUrl: folder.folderUrl,
+      finalPdfUrl: pdfFile.webUrl,
+      verifiedDirectoryUrl: jsonFile.webUrl,
+      indexWarnings,
+    });
+  } catch (error) {
+    console.error('Panel finalization failed:', { message: error.message, status: error.status, code: error.code, pathname: error.pathname, details: error.details, stack: error.stack });
+    res.status(error.status || 500).json({ error: error.message || 'The verified panel directory could not be saved.', code: error.code || null });
   }
 });
 
