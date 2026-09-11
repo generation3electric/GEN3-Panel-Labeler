@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ProcessingReview from './ProcessingReview.jsx';
 import './PastRecords.css';
 
 function formatDate(value) {
@@ -13,6 +14,8 @@ export default function PastRecords() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [openingId, setOpeningId] = useState('');
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -40,6 +43,44 @@ export default function PastRecords() {
     return records.filter((record) => `${record.jobNumber} ${record.address} ${record.panelName} ${record.recordId}`.toLowerCase().includes(q));
   }, [records, query]);
 
+  async function openRecord(record) {
+    setOpeningId(record.id);
+    setError('');
+    try {
+      const response = await fetch(`/api/sharepoint/panel-records/${encodeURIComponent(record.id)}`, { headers: { Accept: 'application/json' } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'The saved panel could not be opened.');
+      setSelected(data);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (openError) {
+      setError(openError.message);
+    } finally {
+      setOpeningId('');
+    }
+  }
+
+  if (selected) {
+    const job = selected.finalization?.job || selected.record?.job || { id: selected.jobNumber, customer: '', address: selected.address };
+    const panel = selected.finalization?.panel || selected.record?.panel || { name: selected.panelName || 'Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '' };
+    return (
+      <div className="historyReviewShell">
+        <header className="historyReviewHeader">
+          <button type="button" onClick={() => setSelected(null)}>← Past Jobs</button>
+          <span>Job #{job.id || selected.jobNumber} · {panel.name}</span>
+        </header>
+        <ProcessingReview
+          key={`${selected.id}-${selected.finalization?.verifiedAt || 'ai'}`}
+          job={job}
+          panel={panel}
+          photoUrls={selected.overviewPhotoUrl ? { breakerField: selected.overviewPhotoUrl } : {}}
+          savedRecord={{ ...selected, listItemId: selected.id }}
+          onStartOver={() => setSelected(null)}
+          returnLabel="Back to Past Jobs"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="historyShell">
       <header className="historyHeader">
@@ -47,7 +88,7 @@ export default function PastRecords() {
         <div>
           <p className="eyebrow">Saved records</p>
           <h1>Past Panel Jobs</h1>
-          <p className="muted">Review prior addresses, open the SharePoint folder, and compare what was captured.</p>
+          <p className="muted">Reopen AI results, continue verification, download completed directories, or view the original photos.</p>
         </div>
       </header>
 
@@ -71,8 +112,11 @@ export default function PastRecords() {
                 </div>
               </div>
               <div className="historyActions">
-                {record.finalPdfUrl && <a className="primary historyOpen" href={record.finalPdfUrl} target="_blank" rel="noreferrer">Open Final PDF</a>}
-                {record.folderUrl ? <a className={record.finalPdfUrl ? 'secondary historyOpen' : 'primary historyOpen'} href={record.folderUrl} target="_blank" rel="noreferrer">Open Record</a> : <button className="secondary" disabled>No folder link</button>}
+                <button className="primary historyOpen" disabled={openingId === record.id} onClick={() => openRecord(record)}>
+                  {openingId === record.id ? 'Opening…' : /verified/i.test(record.status || '') ? 'Open Final Directory' : 'Continue Verification'}
+                </button>
+                {(record.finalPdfUrl || /verified/i.test(record.status || '')) && <a className="secondary historyOpen" href={`/api/sharepoint/panel-records/${encodeURIComponent(record.id)}/final-directory`}>Download PDF</a>}
+                {record.folderUrl ? <a className="secondary historyOpen" href={record.folderUrl} target="_blank" rel="noreferrer">Open Photos</a> : <button className="secondary" disabled>No folder link</button>}
               </div>
             </article>
           ))}
