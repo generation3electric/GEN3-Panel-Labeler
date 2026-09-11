@@ -11,6 +11,7 @@ const commonCircuits = [
 ];
 
 const breakerKinds = [
+  { value: 'empty', label: 'Empty / No Breaker', poles: 1, family: 'standard' },
   { value: '1p_unknown', label: '1P Verify Type', poles: 1, family: 'standard' },
   { value: '2p_unknown', label: '2P Verify Type', poles: 2, family: 'standard' },
   { value: '1p_standard', label: '1P Standard', poles: 1, family: 'standard' },
@@ -123,7 +124,10 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       const next = current.find((r) => r.circuit === circuit + 2);
       const poles = kindByValue[breakerKind]?.poles || 1;
       return current.map((row) => {
-        if (row.circuit === circuit) return { ...row, breakerKind };
+        if (row.circuit === circuit) {
+          if (breakerKind === 'empty') return { ...row, amps: null, description: '', breakerKind, confidence: 'Verified', notes: 'Marked empty during verification' };
+          return { ...row, breakerKind };
+        }
         if (poles === 2 && next && row.circuit === next.circuit) {
           return { ...row, continuationOf: circuit, amps: target.amps, description: target.description, breakerKind, confidence: target.confidence };
         }
@@ -131,6 +135,45 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           return { ...row, continuationOf: null, description: '', breakerKind: '1p_standard', confidence: 'Review' };
         }
         return row;
+      });
+    });
+  }
+
+  function clearBreaker(circuit) {
+    if (!window.confirm(`Mark circuit ${circuit} as empty / no breaker?`)) return;
+    setRows((current) => current.map((row) => {
+      if (row.circuit === circuit || row.continuationOf === circuit) {
+        return {
+          ...row,
+          continuationOf: null,
+          amps: null,
+          description: '',
+          breakerKind: 'empty',
+          confidence: 'Verified',
+          notes: 'Marked empty during verification',
+        };
+      }
+      return row;
+    }));
+  }
+
+  function moveBreaker(circuit, direction) {
+    const destinationCircuit = circuit + (direction * 2);
+    setRows((current) => {
+      const source = current.find((row) => row.circuit === circuit);
+      const destination = current.find((row) => row.circuit === destinationCircuit);
+      if (!source || !destination || source.continuationOf || destination.continuationOf) return current;
+      const sourcePoles = kindByValue[source.breakerKind]?.poles || 1;
+      const destinationPoles = kindByValue[destination.breakerKind]?.poles || 1;
+      if (sourcePoles !== 1 || destinationPoles !== 1) return current;
+
+      const fields = ['amps', 'description', 'breakerKind', 'confidence', 'notes'];
+      return current.map((row) => {
+        if (row.circuit !== circuit && row.circuit !== destinationCircuit) return row;
+        const other = row.circuit === circuit ? destination : source;
+        const swapped = { ...row, continuationOf: null };
+        fields.forEach((field) => { swapped[field] = other[field]; });
+        return swapped;
       });
     });
   }
@@ -148,6 +191,11 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     const rowSpan = kind.poles === 2 ? 2 : 1;
     const query = labelQueries[row.circuit] || '';
     const filteredLabels = commonCircuits.filter((name) => name.toLowerCase().includes(query.toLowerCase())).slice(0, 14);
+    const previousRow = byCircuit[circuit - 2];
+    const nextRow = byCircuit[circuit + 2];
+    const canMoveUp = kind.poles === 1 && previousRow && !previousRow.continuationOf && (kindByValue[previousRow.breakerKind]?.poles || 1) === 1;
+    const canMoveDown = kind.poles === 1 && nextRow && !nextRow.continuationOf && (kindByValue[nextRow.breakerKind]?.poles || 1) === 1;
+    const isEmpty = row.breakerKind === 'empty';
 
     return (
       <React.Fragment key={`${side}-${circuit}`}>
@@ -155,13 +203,14 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           <span className="circuitNumber">{circuit}</span>
           <textarea
             className="circuitDescriptionInput"
-            placeholder="Search or type circuit description…"
+            placeholder={isEmpty ? 'Empty space / no breaker' : 'Search or type circuit description…'}
             value={row.description}
             maxLength={280}
             rows={rowSpan === 2 ? 5 : 3}
             style={{ fontSize: descriptionFontSize(row.description) }}
             onChange={(e) => updateCircuit(row.circuit, 'description', e.target.value)}
             aria-label={`Circuit ${row.circuit} description`}
+            disabled={isEmpty}
           />
           <div className="descriptionAssist">
             <details className="labelPicker">
@@ -189,13 +238,22 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           className={`breakerTile ${side} family-${kind.family} ${row.confidence === 'Review' ? 'needsReview' : ''} ${kind.poles === 2 ? 'twoPole' : ''}`}
           style={{ gridRow: `${rowIndex + 1} / span ${rowSpan}` }}
         >
-          <select className="ampSelect" value={row.amps ?? ''} onChange={(e) => updateCircuit(row.circuit, 'amps', e.target.value ? Number(e.target.value) : null)} aria-label={`Circuit ${row.circuit} amps`}>
-            <option value="">Verify amps</option>
-            {[...new Set([15,20,25,30,40,50,60,70,80,90,100,125,150,175,200, row.amps].filter(Boolean))].sort((a, b) => a - b).map((amp) => <option key={amp} value={amp}>{amp}A</option>)}
-          </select>
+          {isEmpty ? (
+            <div style={{ width: '100%', minHeight: 31, borderRadius: 7, background: 'rgba(255,255,255,.92)', display: 'grid', placeItems: 'center', fontSize: 9, fontWeight: 900 }}>NO BREAKER</div>
+          ) : (
+            <select className="ampSelect" value={row.amps ?? ''} onChange={(e) => updateCircuit(row.circuit, 'amps', e.target.value ? Number(e.target.value) : null)} aria-label={`Circuit ${row.circuit} amps`}>
+              <option value="">Verify amps</option>
+              {[...new Set([15,20,25,30,40,50,60,70,80,90,100,125,150,175,200, row.amps].filter(Boolean))].sort((a, b) => a - b).map((amp) => <option key={amp} value={amp}>{amp}A</option>)}
+            </select>
+          )}
           <select className="breakerKindSelect" value={row.breakerKind} onChange={(e) => changeBreakerKind(row.circuit, e.target.value)} aria-label={`Circuit ${row.circuit} breaker type`}>
             {breakerKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
+          <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 3 }}>
+            <button type="button" disabled={!canMoveUp} onClick={() => moveBreaker(row.circuit, -1)} title="Move breaker up one position" aria-label={`Move circuit ${row.circuit} breaker up`} style={{ minHeight: 24, border: '1px solid rgba(12,41,74,.18)', borderRadius: 6, background: 'rgba(255,255,255,.9)', color: '#17314c', fontWeight: 900 }}>↑</button>
+            <button type="button" disabled={!canMoveDown} onClick={() => moveBreaker(row.circuit, 1)} title="Move breaker down one position" aria-label={`Move circuit ${row.circuit} breaker down`} style={{ minHeight: 24, border: '1px solid rgba(12,41,74,.18)', borderRadius: 6, background: 'rgba(255,255,255,.9)', color: '#17314c', fontWeight: 900 }}>↓</button>
+            <button type="button" onClick={() => clearBreaker(row.circuit)} title="Delete breaker from this position" aria-label={`Delete circuit ${row.circuit} breaker`} style={{ minHeight: 24, border: '1px solid rgba(148,44,32,.25)', borderRadius: 6, background: '#fff6f4', color: '#8e2d23', fontWeight: 900 }}>×</button>
+          </div>
         </div>
       </React.Fragment>
     );
@@ -231,13 +289,15 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             const right = byCircuit[i * 2 + 2];
             const leftSource = left?.continuationOf ? byCircuit[left.continuationOf] : left;
             const rightSource = right?.continuationOf ? byCircuit[right.continuationOf] : right;
+            const leftEmpty = leftSource?.breakerKind === 'empty';
+            const rightEmpty = rightSource?.breakerKind === 'empty';
             return (
               <div className="directoryPreviewRow" key={i}>
                 <span>{left ? left.circuit : ''}</span>
-                <div className={`miniBreaker ${leftSource ? `family-${breakerFamily(leftSource)}` : ''}`}>{leftSource?.amps ? `${leftSource.amps}A` : 'Verify'}</div>
-                <div className="miniDescription leftText">{left?.continuationOf ? '↳' : leftSource?.description || 'Unlabeled'}</div>
-                <div className="miniDescription rightText">{right?.continuationOf ? '↳' : rightSource?.description || 'Unlabeled'}</div>
-                <div className={`miniBreaker ${rightSource ? `family-${breakerFamily(rightSource)}` : ''}`}>{rightSource?.amps ? `${rightSource.amps}A` : 'Verify'}</div>
+                <div className={`miniBreaker ${leftSource ? `family-${breakerFamily(leftSource)}` : ''}`}>{leftEmpty ? 'Empty' : leftSource?.amps ? `${leftSource.amps}A` : 'Verify'}</div>
+                <div className="miniDescription leftText">{left?.continuationOf ? '↳' : leftEmpty ? 'Open space' : leftSource?.description || 'Unlabeled'}</div>
+                <div className="miniDescription rightText">{right?.continuationOf ? '↳' : rightEmpty ? 'Open space' : rightSource?.description || 'Unlabeled'}</div>
+                <div className={`miniBreaker ${rightSource ? `family-${breakerFamily(rightSource)}` : ''}`}>{rightEmpty ? 'Empty' : rightSource?.amps ? `${rightSource.amps}A` : 'Verify'}</div>
                 <span>{right ? right.circuit : ''}</span>
               </div>
             );
