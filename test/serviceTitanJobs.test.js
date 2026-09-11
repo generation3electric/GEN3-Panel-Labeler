@@ -26,7 +26,7 @@ test('joins appointments to real ServiceTitan jobs, customers, and locations', (
       { id: 901, jobId: 501, start: '2026-09-11T14:30:00Z', end: '2026-09-11T16:30:00Z', status: 'Scheduled' },
       { id: 902, jobId: 502, start: '2026-09-11T12:00:00Z', status: 'Canceled' },
     ],
-    jobs: [{ id: 501, jobNumber: '12345678', customerId: 301, locationId: 401, summary: 'Electrical panel assessment' }],
+    jobs: [{ id: 501, jobNumber: '12345678', customerId: 301, locationId: 401, summary: '<div>Electrical panel assessment</div>' }],
     customers: [{ id: 301, name: 'Real Customer' }],
     locations: [{ id: 401, address: { street: '10 Market St', city: 'Philadelphia', state: 'PA', zip: '19106' } }],
   });
@@ -38,4 +38,12 @@ test('joins appointments to real ServiceTitan jobs, customers, and locations', (
     customer: 'Real Customer', address: '10 Market St Philadelphia, PA 19106', status: 'Scheduled',
     summary: 'Electrical panel assessment', customerId: '301', locationId: '401',
   });
+});
+
+test('does not turn a missing ServiceTitan summary into the word undefined', () => {
+  const [choice] = buildJobChoices({
+    appointments: [{ id: 1, jobId: 2, start: '2026-09-11T14:00:00Z', status: 'Scheduled' }],
+    jobs: [{ id: 2 }],
+  });
+  assert.equal(choice.summary, '');
 });

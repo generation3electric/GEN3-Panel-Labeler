@@ -41,6 +41,15 @@ export function buildJobChoices({ appointments = [], jobs = [], customers = [], 
       const address = firstValue(formatAddress(location, linkedJob), location.name, linkedJob.locationName, `Location #${linkedJob.locationId || 'unknown'}`);
       const jobNumber = String(firstValue(linkedJob.jobNumber, linkedJob.number, serviceTitanId));
 
+      const summary = String(firstValue(linkedJob.summary, linkedJob.jobTypeName) || '')
+        .replace(/<br\s*\/?\s*>/gi, ' ')
+        .replace(/<\/div>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+
       return {
         id: jobNumber,
         serviceTitanId: String(serviceTitanId),
@@ -52,7 +61,7 @@ export function buildJobChoices({ appointments = [], jobs = [], customers = [], 
         customer: String(customerName),
         address: String(address),
         status: String(firstValue(appointment.status, linkedJob.jobStatus, 'Scheduled')),
-        summary: String(firstValue(linkedJob.summary, linkedJob.jobTypeName, '')),
+        summary: summary.length > 140 ? `${summary.slice(0, 137).trim()}…` : summary,
         customerId: linkedJob.customerId ? String(linkedJob.customerId) : '',
         locationId: linkedJob.locationId ? String(linkedJob.locationId) : '',
       };

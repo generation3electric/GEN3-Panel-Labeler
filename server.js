@@ -80,8 +80,7 @@ async function serviceTitanEntities(resource, ids, token) {
   if (!uniqueIds.length) return [];
   const entities = [];
   for (let index = 0; index < uniqueIds.length; index += 50) {
-    const params = new URLSearchParams();
-    uniqueIds.slice(index, index + 50).forEach((id) => params.append('ids', id));
+    const params = new URLSearchParams({ ids: uniqueIds.slice(index, index + 50).join(',') });
     const page = await serviceTitanPages(`/crm/v2/tenant/${encodeURIComponent(process.env.SERVICETITAN_TENANT_ID)}/${resource}?${params}`, { token, pageSize: 200, maxPages: 2 });
     entities.push(...page);
   }
@@ -157,8 +156,7 @@ app.get('/api/servicetitan/jobs', async (req, res) => {
     const jobIds = [...new Set(appointments.map((item) => item.jobId).filter(Boolean).map(String))];
     const jobs = [];
     for (let index = 0; index < jobIds.length; index += 50) {
-      const jobParams = new URLSearchParams();
-      jobIds.slice(index, index + 50).forEach((id) => jobParams.append('ids', id));
+      const jobParams = new URLSearchParams({ ids: jobIds.slice(index, index + 50).join(',') });
       jobs.push(...await serviceTitanPages(`/jpm/v2/tenant/${tenant}/jobs?${jobParams}`, { token, pageSize: 200, maxPages: 2 }));
     }
     const customers = await serviceTitanEntities('customers', jobs.map((item) => item.customerId), token);
