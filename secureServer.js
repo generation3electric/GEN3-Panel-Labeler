@@ -16,6 +16,12 @@ const SESSION_COOKIE = '__Host-gen3-panel-session';
 const TX_COOKIE = '__Host-gen3-panel-transaction';
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const TX_MS = 10 * 60 * 1000;
+const ALLOWED_EMAIL_DOMAINS = new Set(
+  String(process.env.AUTH_ALLOWED_EMAIL_DOMAINS || 'generation3electric.com,gen3electric.com')
+    .split(',')
+    .map((value) => value.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean),
+);
 const sessionKey = createHmac('sha256', CLIENT_SECRET || 'not-configured').update('GEN3 Panel Labeler session').digest();
 const txKey = createHmac('sha256', CLIENT_SECRET || 'not-configured').update('GEN3 Panel Labeler transaction').digest();
 
@@ -54,6 +60,18 @@ function noStore(res) {
 async function jsonResponse(response) {
   const text = await response.text();
   try { return text ? JSON.parse(text) : null; } catch { return null; }
+}
+function normalizedEmails(profile) {
+  return [profile?.mail, profile?.userPrincipalName, ...(Array.isArray(profile?.otherMails) ? profile.otherMails : [])]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+}
+function isGen3Account(profile) {
+  if (profile?.userType === 'Member') return true;
+  return normalizedEmails(profile).some((address) => {
+    const at = address.lastIndexOf('@');
+    return at > 0 && ALLOWED_EMAIL_DOMAINS.has(address.slice(at + 1));
+  });
 }
 
 const child = spawn(process.execPath, ['server.js'], {
@@ -117,13 +135,14 @@ app.get('/auth/callback', async (req, res) => {
     });
     const tokens = await jsonResponse(tokenResponse);
     if (!tokenResponse.ok || !tokens?.access_token) throw new Error('token_exchange_failed');
-    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName,userType', {
+    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName,userType,otherMails', {
       headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: 'application/json' },
       redirect: 'error',
       signal: AbortSignal.timeout(15000),
     });
     const profile = await jsonResponse(graphResponse);
-    if (!graphResponse.ok || !profile?.id || profile.userType !== 'Member') return res.redirect('/?authError=employee_required');
+    if (!graphResponse.ok || !profile?.id) throw new Error('profile_lookup_failed');
+    if (!isGen3Account(profile)) return res.redirect('/?authError=employee_required');
     const authSession = {
       v: 1,
       oid: String(profile.id),
@@ -157,7 +176,7 @@ function loginPage(req, res) {
   noStore(res);
   const reason = String(req.query.authError || '');
   const message = reason === 'employee_required'
-    ? 'This account is not an active member of the GEN3 Microsoft organization.'
+    ? 'This Microsoft account is not recognized as a GEN3 company account.'
     : reason
       ? 'Microsoft sign-in could not be completed. Please try again.'
       : 'Sign in with your GEN3 Microsoft account to use the Panel Labeler.';
