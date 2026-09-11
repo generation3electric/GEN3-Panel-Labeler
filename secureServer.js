@@ -16,12 +16,6 @@ const SESSION_COOKIE = '__Host-gen3-panel-session';
 const TX_COOKIE = '__Host-gen3-panel-transaction';
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const TX_MS = 10 * 60 * 1000;
-const ALLOWED_EMAIL_DOMAINS = new Set(
-  String(process.env.AUTH_ALLOWED_EMAIL_DOMAINS || 'generation3electric.com,gen3electric.com')
-    .split(',')
-    .map((value) => value.trim().toLowerCase().replace(/^@/, ''))
-    .filter(Boolean),
-);
 const sessionKey = createHmac('sha256', CLIENT_SECRET || 'not-configured').update('GEN3 Panel Labeler session').digest();
 const txKey = createHmac('sha256', CLIENT_SECRET || 'not-configured').update('GEN3 Panel Labeler transaction').digest();
 
@@ -60,18 +54,6 @@ function noStore(res) {
 async function jsonResponse(response) {
   const text = await response.text();
   try { return text ? JSON.parse(text) : null; } catch { return null; }
-}
-function normalizedEmails(profile) {
-  return [profile?.mail, profile?.userPrincipalName, ...(Array.isArray(profile?.otherMails) ? profile.otherMails : [])]
-    .map((value) => String(value || '').trim().toLowerCase())
-    .filter(Boolean);
-}
-function isGen3Account(profile) {
-  if (profile?.userType === 'Member') return true;
-  return normalizedEmails(profile).some((address) => {
-    const at = address.lastIndexOf('@');
-    return at > 0 && ALLOWED_EMAIL_DOMAINS.has(address.slice(at + 1));
-  });
 }
 
 const child = spawn(process.execPath, ['server.js'], {
@@ -135,14 +117,13 @@ app.get('/auth/callback', async (req, res) => {
     });
     const tokens = await jsonResponse(tokenResponse);
     if (!tokenResponse.ok || !tokens?.access_token) throw new Error('token_exchange_failed');
-    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName,userType,otherMails', {
+    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName', {
       headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: 'application/json' },
       redirect: 'error',
       signal: AbortSignal.timeout(15000),
     });
     const profile = await jsonResponse(graphResponse);
     if (!graphResponse.ok || !profile?.id) throw new Error('profile_lookup_failed');
-    if (!isGen3Account(profile)) return res.redirect('/?authError=employee_required');
     const authSession = {
       v: 1,
       oid: String(profile.id),
@@ -175,12 +156,10 @@ app.get('/auth/session', (req, res) => {
 function loginPage(req, res) {
   noStore(res);
   const reason = String(req.query.authError || '');
-  const message = reason === 'employee_required'
-    ? 'This Microsoft account is not recognized as a GEN3 company account.'
-    : reason
-      ? 'Microsoft sign-in could not be completed. Please try again.'
-      : 'Sign in with your GEN3 Microsoft account to use the Panel Labeler.';
-  res.status(401).type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GEN3 Panel Labeler Sign-In</title><style>body{margin:0;font-family:Arial,sans-serif;background:#f5f7fa;color:#12233f;display:grid;min-height:100vh;place-items:center}.card{width:min(420px,calc(100% - 40px));background:white;border-radius:18px;padding:32px;box-shadow:0 12px 38px #0002}.brand{font-size:29px;font-weight:800;margin-bottom:8px}.sub{font-size:18px;font-weight:700;margin-bottom:24px}.msg{line-height:1.5;color:#46546a;margin-bottom:24px}.btn{display:block;text-align:center;text-decoration:none;background:#122d53;color:white;font-weight:700;padding:14px 18px;border-radius:10px}.note{font-size:12px;color:#6b778b;margin-top:18px;line-height:1.4}</style></head><body><main class="card"><div class="brand">⚡ GEN3</div><div class="sub">Panel Labeler</div><div class="msg">${message}</div><a class="btn" href="/auth/login">Sign in with Microsoft</a><div class="note">Access is limited to GEN3 Microsoft accounts. Panel photos already saved offline on this device are not deleted by signing in.</div></main></body></html>`);
+  const message = reason
+    ? 'Microsoft sign-in could not be completed. Make sure this account is assigned to the GEN3 Panel Labeler Sign-In enterprise application.'
+    : 'Sign in with your assigned GEN3 Microsoft account to use the Panel Labeler.';
+  res.status(401).type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GEN3 Panel Labeler Sign-In</title><style>body{margin:0;font-family:Arial,sans-serif;background:#f5f7fa;color:#12233f;display:grid;min-height:100vh;place-items:center}.card{width:min(420px,calc(100% - 40px));background:white;border-radius:18px;padding:32px;box-shadow:0 12px 38px #0002}.brand{font-size:29px;font-weight:800;margin-bottom:8px}.sub{font-size:18px;font-weight:700;margin-bottom:24px}.msg{line-height:1.5;color:#46546a;margin-bottom:24px}.btn{display:block;text-align:center;text-decoration:none;background:#122d53;color:white;font-weight:700;padding:14px 18px;border-radius:10px}.note{font-size:12px;color:#6b778b;margin-top:18px;line-height:1.4}</style></head><body><main class="card"><div class="brand">⚡ GEN3</div><div class="sub">Panel Labeler</div><div class="msg">${message}</div><a class="btn" href="/auth/login">Sign in with Microsoft</a><div class="note">Access is controlled by Microsoft Entra assignment. Panel photos already saved offline on this device are not deleted by signing in.</div></main></body></html>`);
 }
 
 app.use((req, res, next) => {
