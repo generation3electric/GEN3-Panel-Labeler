@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
-import { getPendingCount, getPendingPanels, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
+import UploadActivity from './UploadActivity.jsx';
+import { getAllLocalPanels, getPendingPanels, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
 
 const JOB_CACHE_PREFIX = 'gen3-panel-jobs:';
 
@@ -12,7 +13,7 @@ function localDateValue() {
 
 const manufacturers = ['Unknown', 'Square D', 'Eaton / Cutler-Hammer', 'Siemens', 'GE', 'Federal Pacific', 'Zinsco', 'Other'];
 
-function Header({ step, onHome, online, pendingCount, syncing }) {
+function Header({ step, onHome, onUploads, online, pendingCount, syncing }) {
   return (
     <header className="topbar">
       <button className="brand" onClick={onHome} aria-label="Go home">
@@ -20,9 +21,9 @@ function Header({ step, onHome, online, pendingCount, syncing }) {
         <span><strong>GEN3</strong><small>Panel Labeler</small></span>
       </button>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <div className="stepPill" style={{ background: online ? 'rgba(255,255,255,.11)' : '#8b3b19' }}>
+        <button type="button" className="stepPill uploadPill" onClick={onUploads} style={{ background: online ? 'rgba(255,255,255,.11)' : '#8b3b19' }}>
           {syncing ? 'Syncing…' : online ? (pendingCount ? `${pendingCount} pending` : 'Online') : 'Offline · saved locally'}
-        </div>
+        </button>
         {step > 0 && <div className="stepPill">Step {Math.min(step, 4)} of 4</div>}
       </div>
     </header>
@@ -72,8 +73,11 @@ export default function App() {
   const [processing, setProcessing] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
+  const [localPanels, setLocalPanels] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const [localNotice, setLocalNotice] = useState('');
+  const [activityOpen, setActivityOpen] = useState(false);
+  const syncInFlight = useRef(false);
 
   const filteredJobs = jobs.filter((j) => `${j.id} ${j.customer} ${j.address} ${j.summary || ''}`.toLowerCase().includes(query.toLowerCase()));
   const capturedCount = (overview ? 1 : 0) + leftPhotos.length + rightPhotos.length + (directory ? 1 : 0);
@@ -88,8 +92,14 @@ export default function App() {
     return result;
   }, [overview, leftPhotos, rightPhotos, directory]);
 
-  async function refreshPendingCount() {
-    try { setPendingCount(await getPendingCount()); } catch (error) { console.warn('Could not read offline queue', error); }
+  async function refreshLocalPanels() {
+    try {
+      const items = await getAllLocalPanels();
+      setLocalPanels(items);
+      setPendingCount(items.filter((item) => item.status !== 'uploaded').length);
+    } catch (error) {
+      console.warn('Could not read offline queue', error);
+    }
   }
 
   async function loadJobs(date = jobDate) {
@@ -130,7 +140,8 @@ export default function App() {
   }
 
   async function syncPending() {
-    if (!navigator.onLine || syncing) return;
+    if (!navigator.onLine || syncInFlight.current) return;
+    syncInFlight.current = true;
     setSyncing(true);
     try {
       const items = await getPendingPanels();
@@ -139,13 +150,14 @@ export default function App() {
         catch (error) { console.warn(`Pending panel ${item.recordId} remains local:`, error.message); break; }
       }
     } finally {
-      await refreshPendingCount();
+      await refreshLocalPanels();
       setSyncing(false);
+      syncInFlight.current = false;
     }
   }
 
   useEffect(() => {
-    refreshPendingCount();
+    refreshLocalPanels();
     const onOnline = () => { setOnline(true); window.setTimeout(syncPending, 250); };
     const onOffline = () => setOnline(false);
     window.addEventListener('online', onOnline);
@@ -160,7 +172,7 @@ export default function App() {
 
   function reset() {
     setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
-    setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setSending(false); setSendError(''); setSavedRecord(null); setProcessing(false); setLocalNotice('');
+    setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setSending(false); setSendError(''); setSavedRecord(null); setProcessing(false); setActivityOpen(false); setLocalNotice('');
   }
 
   function buildQueuedRecord() {
@@ -193,7 +205,7 @@ export default function App() {
     const queued = buildQueuedRecord();
     try {
       await savePendingPanel(queued);
-      await refreshPendingCount();
+      await refreshLocalPanels();
       if (!navigator.onLine) {
         setLocalNotice('Saved on this device. It will upload automatically when data service returns.');
         resetAfterLocalSave();
@@ -202,7 +214,7 @@ export default function App() {
       try {
         const result = await uploadQueuedItem(queued);
         setSavedRecord(result);
-        await refreshPendingCount();
+        await refreshLocalPanels();
         setProcessing(true);
       } catch (error) {
         setLocalNotice('Upload could not finish, so the complete panel is still saved safely on this device and will retry later.');
@@ -219,18 +231,41 @@ export default function App() {
     setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setStep(0); setJob(null);
   }
 
+  function reviewUploadedPanel(item) {
+    setJob(item.record?.job || null);
+    setPanel(item.record?.panel || { name: 'Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '' });
+    setSavedRecord(item.receipt || item);
+    setActivityOpen(false);
+    setProcessing(true);
+  }
+
+  async function uploadAndReview(item) {
+    const result = await uploadQueuedItem(item);
+    await refreshLocalPanels();
+    reviewUploadedPanel({ ...item, status: 'uploaded', uploadedAt: new Date().toISOString(), receipt: result });
+  }
+
   if (processing) {
     return (
       <div className="appShell">
-        <Header step={4} onHome={reset} online={online} pendingCount={pendingCount} syncing={syncing} />
+        <Header step={4} onHome={reset} onUploads={() => { setProcessing(false); setActivityOpen(true); refreshLocalPanels(); }} online={online} pendingCount={pendingCount} syncing={syncing} />
         <ProcessingReview job={job} panel={panel} photoUrls={processingPhotoUrls} savedRecord={savedRecord} onStartOver={reset} />
+      </div>
+    );
+  }
+
+  if (activityOpen) {
+    return (
+      <div className="appShell">
+        <Header step={0} onHome={reset} onUploads={() => refreshLocalPanels()} online={online} pendingCount={pendingCount} syncing={syncing} />
+        <UploadActivity items={localPanels} online={online} syncing={syncing} onBack={reset} onRefresh={syncPending} onUpload={uploadAndReview} onReview={reviewUploadedPanel} />
       </div>
     );
   }
 
   return (
     <div className="appShell">
-      <Header step={step} onHome={reset} online={online} pendingCount={pendingCount} syncing={syncing} />
+      <Header step={step} onHome={reset} onUploads={() => { setActivityOpen(true); refreshLocalPanels(); }} online={online} pendingCount={pendingCount} syncing={syncing} />
       <main className="content">
         {localNotice && <div className="infoStrip" style={{ marginBottom: 18 }}><strong>Offline record:</strong> {localNotice}</div>}
         {step === 0 && (
@@ -239,6 +274,10 @@ export default function App() {
             <h1>Create a clean panel directory with fewer photos.</h1>
             <p className="lead">Capture one overview, then take only as many breaker photos as needed on the left and right sides. The app keeps working in basement dead zones and syncs later.</p>
             <button className="primary large" onClick={() => setStep(1)}>Start Panel Label</button>
+            <div className="homeLinks">
+              <button type="button" className="secondary" onClick={() => { setActivityOpen(true); refreshLocalPanels(); }}>Pending / Recently Uploaded{pendingCount ? ` (${pendingCount})` : ''}</button>
+              <a className="secondary" href="/past-records">Past Jobs</a>
+            </div>
             {pendingCount > 0 && <div className="infoStrip"><strong>{pendingCount} panel{pendingCount === 1 ? '' : 's'} waiting to upload.</strong> {online ? 'Sync will retry automatically.' : 'They are stored on this device until service returns.'}</div>}
           </section>
         )}

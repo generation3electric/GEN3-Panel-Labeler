@@ -17,6 +17,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .brand small { display:block; opacity:.74; font-size:12px; margin-top:4px; }
 .bolt { width: 38px; height:38px; display:grid; place-items:center; border-radius:50%; background:#b7d433; color:#0c294a; font-size:20px; }
 .stepPill { background:rgba(255,255,255,.11); border:1px solid rgba(255,255,255,.16); border-radius:20px; padding:8px 12px; font-size:12px; font-weight:700; }
+.uploadPill { color:white; min-height:36px; }
 .content { width:min(680px,100%); margin:0 auto; padding:34px 20px 110px; }
 .eyebrow { margin:0 0 8px; text-transform:uppercase; letter-spacing:.14em; color:#56708c; font-size:12px; font-weight:800; }
 h1 { margin:0; color:#0d2949; font-size:clamp(30px,7vw,48px); line-height:1.05; letter-spacing:-.035em; }
@@ -28,6 +29,8 @@ h1 { margin:0; color:#0d2949; font-size:clamp(30px,7vw,48px); line-height:1.05; 
 .sendButton { font-size:17px; }
 .primary.large { width:100%; min-height:58px; font-size:17px; }
 .secondary { background:#e5ebf0; color:#27425d; }
+.homeLinks { display:grid; grid-template-columns:1fr 120px; gap:10px; margin-top:12px; }
+.homeLinks .secondary { display:grid; place-items:center; min-height:50px; text-align:center; text-decoration:none; }
 .infoStrip { margin-top:18px; background:white; border:1px solid #dce5ec; border-radius:14px; padding:16px; color:#607487; line-height:1.5; font-size:14px; box-shadow:0 5px 18px rgba(17,42,69,.05); }
 .search,input,select { width:100%; border:1px solid #cfdae4; background:white; border-radius:12px; min-height:50px; padding:0 14px; color:#17314c; outline:none; }
 .search { margin:18px 0; }
@@ -101,6 +104,37 @@ input:focus,select:focus,.search:focus { border-color:#8eaa24; box-shadow:0 0 0 
 .sendError { display:grid; gap:6px; margin-top:16px; padding:14px; border:1px solid #e8b59c; border-radius:12px; background:#fff2eb; color:#7f3517; }
 .sendError span { line-height:1.4; font-size:13px; }
 .sendError button { justify-self:start; border:0; padding:0; background:transparent; color:#8c3815; text-decoration:underline; font-weight:800; }
+
+.uploadActivityPage { width:min(760px,100%); }
+.activityBack { border:0; padding:0; margin:0 0 24px; background:transparent; color:#365b7d; font-weight:800; }
+.connectionBanner { display:flex; justify-content:space-between; gap:14px; align-items:center; margin:22px 0 30px; padding:16px; border:1px solid #d8e2e9; border-radius:15px; background:white; }
+.connectionBanner.offline { border-color:#e2baa4; background:#fff6f0; }
+.connectionBanner div { display:grid; gap:3px; }
+.connectionBanner strong { color:#1f3c57; }
+.connectionBanner span { color:#697d8f; font-size:13px; line-height:1.35; }
+.connectionBanner button { flex:0 0 auto; min-height:40px; padding:0 13px; border:0; border-radius:10px; background:#e5ebf0; color:#27425d; font-weight:800; }
+.activitySection { margin-top:30px; }
+.activitySectionTitle { display:flex; justify-content:space-between; gap:16px; align-items:end; margin-bottom:12px; }
+.activitySectionTitle div { display:grid; gap:3px; }
+.activitySectionTitle span { color:#748698; font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
+.activitySectionTitle strong { color:#173552; font-size:22px; }
+.activitySectionTitle>b { display:grid; place-items:center; min-width:34px; height:34px; padding:0 8px; border-radius:18px; background:#0c294a; color:white; }
+.uploadList { display:grid; gap:12px; }
+.uploadCard { padding:17px; border:1px solid #d9e3ea; border-radius:16px; background:white; box-shadow:0 5px 18px rgba(17,42,69,.05); }
+.uploadCard.pending { border-left:5px solid #dc7a3d; }
+.uploadCard.uploaded { border-left:5px solid #a8c52c; }
+.uploadCardTopline { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.uploadCardTopline time { color:#7a8b9a; font-size:11px; }
+.uploadStatus { padding:5px 8px; border-radius:10px; font-size:10px; font-weight:900; letter-spacing:.04em; text-transform:uppercase; }
+.uploadStatus.pending { background:#fff0e5; color:#9a481b; }
+.uploadStatus.uploaded { background:#edf5cc; color:#536d00; }
+.uploadCard h2 { margin:13px 0 11px; color:#173552; font-size:18px; line-height:1.25; }
+.uploadCardMeta { display:flex; flex-wrap:wrap; gap:8px 18px; margin-bottom:14px; color:#526b80; font-size:12px; }
+.uploadCardMeta span { display:flex; gap:5px; }
+.uploadCardMeta b { color:#8493a0; text-transform:uppercase; font-size:9px; letter-spacing:.05em; align-self:center; }
+.uploadCardAction { width:100%; display:flex; justify-content:space-between; align-items:center; min-height:48px; }
+.uploadCardAction span { font-size:24px; line-height:1; }
+.activityEmpty { padding:22px 16px; border:1px dashed #c9d5de; border-radius:14px; color:#738596; text-align:center; background:rgba(255,255,255,.55); }
 
 .processPage { width:min(900px,100%); }
 .processSteps { display:grid; gap:10px; margin:22px 0; }
