@@ -1,4 +1,4 @@
-const CACHE = 'gen3-panel-labeler-v1';
+const CACHE = 'gen3-panel-labeler-v2';
 const APP_SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {

@@ -13,6 +13,8 @@ Mobile-first field workflow for collecting the information and photos needed to 
 - Completion checklist prevents submission with missing required photos
 - One-button SharePoint submission
 - Job/panel folder creation, photo upload, metadata file, and index entry
+- Offline queue with automatic retry plus a Pending / Recently Uploaded screen
+- One-tap return from a completed background upload to the saved AI verification result
 
 ## SharePoint connection
 

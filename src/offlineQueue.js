@@ -41,25 +41,31 @@ export async function deletePendingPanel(recordId) {
   });
 }
 
+export function uploadedPanelRecord(item, receipt = {}, uploadedAt = new Date().toISOString()) {
+  return {
+    ...item,
+    status: 'uploaded',
+    // The original image blobs are cleared only after a confirmed server upload.
+    // Keep the complete lightweight receipt so the AI result can be reopened.
+    photos: [],
+    uploadedAt,
+    receipt: {
+      ...receipt,
+      recordId: receipt.recordId || item.recordId,
+      folderUrl: receipt.folderUrl || '',
+      listItemId: receipt.listItemId || '',
+      uploadedCount: receipt.uploadedCount ?? null,
+    },
+  };
+}
+
 export async function markPanelUploaded(recordId, receipt = {}) {
   const db = await openDb();
   const tx = db.transaction(STORE, 'readwrite');
   const store = tx.objectStore(STORE);
   const item = await requestResult(store.get(recordId));
   if (!item) return;
-  // Important: only clear image blobs after the server confirms a successful upload.
-  store.put({
-    ...item,
-    status: 'uploaded',
-    photos: [],
-    uploadedAt: new Date().toISOString(),
-    receipt: {
-      recordId: receipt.recordId || recordId,
-      folderUrl: receipt.folderUrl || '',
-      listItemId: receipt.listItemId || '',
-      uploadedCount: receipt.uploadedCount ?? null,
-    },
-  });
+  store.put(uploadedPanelRecord(item, receipt));
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -80,6 +86,18 @@ export async function getPendingPanels() {
 export async function getPendingCount() {
   const items = await getPendingPanels();
   return items.length;
+}
+
+export function splitLocalPanels(items = []) {
+  const sorted = [...items].sort((a, b) => {
+    const aDate = a.uploadedAt || a.savedLocallyAt || a.record?.capturedAt || '';
+    const bDate = b.uploadedAt || b.savedLocallyAt || b.record?.capturedAt || '';
+    return String(bDate).localeCompare(String(aDate));
+  });
+  return {
+    pending: sorted.filter((item) => item.status !== 'uploaded'),
+    uploaded: sorted.filter((item) => item.status === 'uploaded'),
+  };
 }
 
 export function panelToFormData(item) {
