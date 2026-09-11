@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
 import { getPendingCount, getPendingPanels, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
 
-const sampleJobs = [
-  { id: '7845621', time: '10:00 AM', customer: 'John Smith', address: '1428 Pine Street, Philadelphia, PA 19102' },
-  { id: '7845688', time: '1:00 PM', customer: 'Maria Jones', address: '2207 S 18th Street, Philadelphia, PA 19145' },
-  { id: '7845713', time: '3:30 PM', customer: 'David Williams', address: '7812 Germantown Avenue, Philadelphia, PA 19118' },
-];
+const JOB_CACHE_PREFIX = 'gen3-panel-jobs:';
+
+function localDateValue() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
 
 const manufacturers = ['Unknown', 'Square D', 'Eaton / Cutler-Hammer', 'Siemens', 'GE', 'Federal Pacific', 'Zinsco', 'Other'];
 
@@ -54,6 +56,11 @@ export default function App() {
   const [step, setStep] = useState(0);
   const [job, setJob] = useState(null);
   const [query, setQuery] = useState('');
+  const [jobDate, setJobDate] = useState(localDateValue);
+  const [jobs, setJobs] = useState([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState('');
+  const [jobsSource, setJobsSource] = useState('');
   const [panel, setPanel] = useState({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
   const [overview, setOverview] = useState(null);
   const [leftPhotos, setLeftPhotos] = useState([]);
@@ -68,7 +75,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [localNotice, setLocalNotice] = useState('');
 
-  const filteredJobs = sampleJobs.filter((j) => `${j.id} ${j.customer} ${j.address}`.toLowerCase().includes(query.toLowerCase()));
+  const filteredJobs = jobs.filter((j) => `${j.id} ${j.customer} ${j.address} ${j.summary || ''}`.toLowerCase().includes(query.toLowerCase()));
   const capturedCount = (overview ? 1 : 0) + leftPhotos.length + rightPhotos.length + (directory ? 1 : 0);
   const complete = Boolean(overview && leftPhotos.length && rightPhotos.length);
 
@@ -83,6 +90,35 @@ export default function App() {
 
   async function refreshPendingCount() {
     try { setPendingCount(await getPendingCount()); } catch (error) { console.warn('Could not read offline queue', error); }
+  }
+
+  async function loadJobs(date = jobDate) {
+    setJobsLoading(true);
+    setJobsError('');
+    setJob(null);
+    const cacheKey = `${JOB_CACHE_PREFIX}${date}`;
+    try {
+      const response = await fetch(`/api/servicetitan/jobs?date=${encodeURIComponent(date)}`, { headers: { Accept: 'application/json' } });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'ServiceTitan jobs could not be loaded.');
+      setJobs(result.jobs || []);
+      setJobsSource('live');
+      localStorage.setItem(cacheKey, JSON.stringify({ jobs: result.jobs || [], loadedAt: result.loadedAt }));
+    } catch (error) {
+      let cached = null;
+      try { cached = JSON.parse(localStorage.getItem(cacheKey)); } catch { cached = null; }
+      if (cached?.jobs?.length) {
+        setJobs(cached.jobs);
+        setJobsSource('cached');
+        setJobsError(`Live ServiceTitan data is unavailable. Showing the jobs saved on this device from ${new Date(cached.loadedAt).toLocaleString()}.`);
+      } else {
+        setJobs([]);
+        setJobsSource('');
+        setJobsError(error.message);
+      }
+    } finally {
+      setJobsLoading(false);
+    }
   }
 
   async function uploadQueuedItem(item) {
@@ -117,6 +153,10 @@ export default function App() {
     if (navigator.onLine) window.setTimeout(syncPending, 500);
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
   }, []);
+
+  useEffect(() => {
+    if (step === 1) loadJobs(jobDate);
+  }, [step, jobDate]);
 
   function reset() {
     setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
@@ -207,8 +247,14 @@ export default function App() {
           <section>
             <p className="eyebrow">1 · Identify the job</p><h1>Which job are you on?</h1>
             <p className="muted">Load the job before entering a dead zone. Once loaded, panel setup and photos work without data.</p>
+            <label className="dateField">Appointment date<input type="date" value={jobDate} onChange={(e) => setJobDate(e.target.value)} /></label>
             <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search job #, customer, or address" />
-            <div className="jobs">{filteredJobs.map((j) => <button key={j.id} className={`jobCard ${job?.id === j.id ? 'selected' : ''}`} onClick={() => setJob(j)}><div className="jobTime">{j.time}</div><div className="jobMain"><strong>{j.customer}</strong><span>{j.address}</span><small>Job #{j.id}</small></div><div className="chev">›</div></button>)}</div>
+            {jobsLoading && <div className="jobState">Loading ServiceTitan appointments…</div>}
+            {!jobsLoading && jobsError && <div className={`jobState ${jobsSource === 'cached' ? 'warning' : 'error'}`}><span>{jobsError}</span><button type="button" onClick={() => loadJobs(jobDate)}>Try again</button></div>}
+            {!jobsLoading && !jobsError && jobsSource === 'live' && <div className="jobSource">Live from ServiceTitan · {jobs.length} appointment{jobs.length === 1 ? '' : 's'}</div>}
+            {!jobsLoading && !jobsError && jobs.length === 0 && <div className="jobState">No ServiceTitan appointments were found for this date.</div>}
+            {!jobsLoading && jobs.length > 0 && filteredJobs.length === 0 && <div className="jobState">No loaded appointments match that search.</div>}
+            <div className="jobs">{filteredJobs.map((j) => <button key={`${j.appointmentId}-${j.serviceTitanId}`} className={`jobCard ${job?.appointmentId === j.appointmentId ? 'selected' : ''}`} onClick={() => setJob(j)}><div className="jobTime">{j.time}<small>{j.status}</small></div><div className="jobMain"><strong>{j.customer}</strong><span>{j.address}</span><small>Job #{j.id}{j.summary ? ` · ${j.summary}` : ''}</small></div><div className="chev">›</div></button>)}</div>
             <div className="bottomActions"><button className="secondary" onClick={() => setStep(0)}>Back</button><button className="primary" disabled={!job} onClick={() => setStep(2)}>Confirm Job</button></div>
           </section>
         )}

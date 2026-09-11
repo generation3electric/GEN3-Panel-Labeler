@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzePanelPhotos, openAIConfigured } from './aiPanel.js';
+import { buildJobChoices, isIsoDate } from './serviceTitanJobs.js';
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 20 } });
@@ -64,6 +65,28 @@ async function serviceTitan(pathname, options = {}) {
   }
   return data;
 }
+async function serviceTitanPages(pathname, { token, pageSize = 200, maxPages = 10 } = {}) {
+  const separator = pathname.includes('?') ? '&' : '?';
+  const items = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const result = await serviceTitan(`${pathname}${separator}page=${page}&pageSize=${pageSize}`, { token });
+    items.push(...(result?.data || []));
+    if (!result?.hasMore) return items;
+  }
+  return items;
+}
+async function serviceTitanEntities(resource, ids, token) {
+  const uniqueIds = [...new Set(ids.filter(Boolean).map(String))];
+  if (!uniqueIds.length) return [];
+  const entities = [];
+  for (let index = 0; index < uniqueIds.length; index += 50) {
+    const params = new URLSearchParams();
+    uniqueIds.slice(index, index + 50).forEach((id) => params.append('ids', id));
+    const page = await serviceTitanPages(`/crm/v2/tenant/${encodeURIComponent(process.env.SERVICETITAN_TENANT_ID)}/${resource}?${params}`, { token, pageSize: 200, maxPages: 2 });
+    entities.push(...page);
+  }
+  return entities;
+}
 async function graph(token, pathname, options = {}) {
   const response = await fetch(`https://graph.microsoft.com/v1.0${pathname}`, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.body && !Buffer.isBuffer(options.body) ? { 'content-type': 'application/json' } : {}), ...options.headers } });
   const text = await response.text();
@@ -116,6 +139,36 @@ app.get('/api/servicetitan/technicians', async (_req, res) => {
   } catch (error) {
     console.error('ServiceTitan technicians failed:', { message: error.message, status: error.status, details: error.details });
     res.status(error.status || 502).json({ error: error.message });
+  }
+});
+app.get('/api/servicetitan/jobs', async (req, res) => {
+  if (!serviceTitanConfigured()) return res.status(503).json({ error: 'ServiceTitan is not configured.' });
+  const date = String(req.query.date || '').trim();
+  if (!isIsoDate(date)) return res.status(400).json({ error: 'Choose a valid appointment date.' });
+
+  try {
+    const token = await getServiceTitanAccessToken();
+    const tenant = encodeURIComponent(process.env.SERVICETITAN_TENANT_ID);
+    const nextDay = new Date(`${date}T12:00:00Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const endDate = nextDay.toISOString().slice(0, 10);
+    const params = new URLSearchParams({ startsOnOrAfter: `${date}T00:00:00`, startsBefore: `${endDate}T00:00:00` });
+    const appointments = await serviceTitanPages(`/jpm/v2/tenant/${tenant}/appointments?${params}`, { token });
+    const jobIds = [...new Set(appointments.map((item) => item.jobId).filter(Boolean).map(String))];
+    const jobs = [];
+    for (let index = 0; index < jobIds.length; index += 50) {
+      const jobParams = new URLSearchParams();
+      jobIds.slice(index, index + 50).forEach((id) => jobParams.append('ids', id));
+      jobs.push(...await serviceTitanPages(`/jpm/v2/tenant/${tenant}/jobs?${jobParams}`, { token, pageSize: 200, maxPages: 2 }));
+    }
+    const customers = await serviceTitanEntities('customers', jobs.map((item) => item.customerId), token);
+    const locations = await serviceTitanEntities('locations', jobs.map((item) => item.locationId), token);
+    const jobChoices = buildJobChoices({ appointments, jobs, customers, locations });
+    res.json({ date, jobs: jobChoices, count: jobChoices.length, loadedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error('ServiceTitan jobs failed:', { message: error.message, status: error.status, details: error.details });
+    const permissionHint = error.status === 403 ? ' Confirm this ServiceTitan app has read access to Jobs, Appointments, Customers, and Locations.' : '';
+    res.status(error.status || 502).json({ error: `${error.message}${permissionHint}` });
   }
 });
 
