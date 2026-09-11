@@ -4,7 +4,7 @@ Mobile-first field workflow for collecting the information and photos needed to 
 
 ## Current workflow
 
-- Select a sample job (placeholder for ServiceTitan appointments)
+- Select a live ServiceTitan appointment and its linked job, customer, and service location
 - Confirm customer/location information
 - Identify panel name/manufacturer/main breaker/spaces/existing label quality
 - Guided required photo sequence
@@ -26,6 +26,17 @@ The Railway service securely connects to Microsoft Graph. Configure these Railwa
 
 The Entra application needs Microsoft Graph application access to the GEN3 Field Records site. Prefer `Sites.Selected`; `Sites.ReadWrite.All` also works but grants broader access than this app needs.
 
+## ServiceTitan connection
+
+The job picker loads appointments for the selected date, then resolves the linked ServiceTitan job, customer, and service location. Configure these Railway variables:
+
+- `SERVICETITAN_APP_KEY`
+- `SERVICETITAN_CLIENT_ID`
+- `SERVICETITAN_CLIENT_SECRET`
+- `SERVICETITAN_TENANT_ID`
+
+The ServiceTitan application needs read access to Jobs, Appointments, Customers, and Locations. Successfully loaded dates are cached on the device so a technician can select a job after entering a basement dead zone.
+
 ## Run locally
 
 ```bash
@@ -41,10 +52,7 @@ npm run build
 
 ## Next milestones
 
-1. Replace sample jobs with ServiceTitan job/appointment search.
-2. Persist panel records and image uploads to backend storage.
-3. Add photo quality checks (blur, glare, framing).
-4. Add additional-photo workflow for unusual panels and large breaker fields.
-5. Process submitted images to detect breaker layout, amperage, labels, tandems, and manufacturer.
-6. Add office review for low-confidence AI results.
-7. Generate a typed panel directory / homeowner PDF and retain a permanent digital panel record.
+1. Add photo quality checks (blur, glare, framing).
+2. Add additional-photo workflow for unusual panels and large breaker fields.
+3. Add office review for low-confidence AI results.
+4. Generate a typed panel directory / homeowner PDF and retain a permanent digital panel record.

@@ -31,11 +31,19 @@ h1 { margin:0; color:#0d2949; font-size:clamp(30px,7vw,48px); line-height:1.05; 
 .infoStrip { margin-top:18px; background:white; border:1px solid #dce5ec; border-radius:14px; padding:16px; color:#607487; line-height:1.5; font-size:14px; box-shadow:0 5px 18px rgba(17,42,69,.05); }
 .search,input,select { width:100%; border:1px solid #cfdae4; background:white; border-radius:12px; min-height:50px; padding:0 14px; color:#17314c; outline:none; }
 .search { margin:18px 0; }
+.dateField { display:grid; gap:7px; margin-top:18px; color:#536b81; font-size:13px; font-weight:800; }
+.dateField input { color-scheme:light; }
+.jobSource { margin:-7px 0 13px; color:#5c7184; font-size:12px; font-weight:800; }
+.jobState { display:grid; gap:10px; margin:0 0 14px; padding:15px; border:1px solid #d5e0e8; border-radius:13px; background:white; color:#5b7083; line-height:1.4; font-size:14px; }
+.jobState.warning { border-color:#e0c47f; background:#fff8e8; color:#76571d; }
+.jobState.error { border-color:#e8b59c; background:#fff2eb; color:#7f3517; }
+.jobState button { justify-self:start; border:0; padding:0; background:transparent; color:inherit; text-decoration:underline; font-weight:800; }
 input:focus,select:focus,.search:focus { border-color:#8eaa24; box-shadow:0 0 0 3px rgba(181,211,51,.17); }
 .jobs { display:grid; gap:10px; }
 .jobCard { width:100%; display:grid; grid-template-columns:72px 1fr 20px; align-items:center; gap:12px; background:white; border:1px solid #d9e2e9; border-radius:14px; padding:16px; text-align:left; color:#1a334c; }
 .jobCard.selected { border:2px solid #9db827; box-shadow:0 0 0 3px rgba(181,211,51,.13); }
 .jobTime { font-size:12px; font-weight:800; color:#688096; }
+.jobTime small { display:block; margin-top:5px; color:#8b9aa7; font-size:9px; text-transform:uppercase; letter-spacing:.04em; }
 .jobMain { min-width:0; }
 .jobMain strong,.jobMain span,.jobMain small { display:block; }
 .jobMain strong { margin-bottom:4px; }
