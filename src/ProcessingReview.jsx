@@ -39,7 +39,7 @@ function descriptionFontSize(text) {
   return '13px';
 }
 
-export default function ProcessingReview({ job, panel, photoUrls, savedRecord, onFinalized, onStartOver }) {
+export default function ProcessingReview({ job, panel, photoUrls, savedRecord, onFinalized, onStartOver, returnLabel = 'Start Another Panel' }) {
   const analysis = useMemo(() => getAIAnalysis(savedRecord), [savedRecord]);
   const normalized = useMemo(() => buildRowsFromAnalysis(panel, analysis), [panel, analysis]);
   const previousFinalization = savedRecord?.finalization || savedRecord?.receipt?.finalization || null;
@@ -277,7 +277,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
         <div className="finalActions noPrint"><button className="secondary" onClick={() => setPhase('review')}>Back to Review</button>{finalReceipt?.finalPdfUrl ? <a className="primary" href={finalReceipt.finalPdfUrl} target="_blank" rel="noreferrer">Open Saved PDF</a> : <button className="primary" onClick={() => window.print()}>Print Copy</button>}</div>
         <button className="secondary noPrint printCopyButton" onClick={() => window.print()}>Print Another Copy</button>
         <div className="nextProcessCard noPrint"><span>Next process</span><strong>Panel Load Calculation</strong><p>Use the verified breakers, appliance circuits and service size as the starting point for the load-calculation workflow.</p></div>
-        <button className="secondary noPrint" onClick={onStartOver}>Start Another Panel</button>
+        <button className="secondary noPrint" onClick={onStartOver}>{returnLabel}</button>
       </main>
     );
   }
