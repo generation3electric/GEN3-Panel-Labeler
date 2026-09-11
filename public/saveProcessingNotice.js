@@ -5,6 +5,9 @@
 
   const style = document.createElement('style');
   style.textContent = `
+    .gen3-processing-overlay[hidden] {
+      display: none !important;
+    }
     .gen3-processing-overlay {
       position: fixed;
       inset: 0;
