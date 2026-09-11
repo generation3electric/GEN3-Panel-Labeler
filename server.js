@@ -1,4 +1,5 @@
 import express from 'express';
+import { validatePhotoRecord } from './src/photoRules.js';
 import multer from 'multer';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -398,6 +399,8 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
     const record = JSON.parse(req.body.record || '{}');
     if (!record.job?.id || !record.panel?.name || !record.recordId) return res.status(400).json({ error: 'Job, panel name, and record ID are required.' });
     if (!(req.files || []).length) return res.status(400).json({ error: 'At least one panel photo is required.' });
+    const photoErrors = validatePhotoRecord(record, req.files.map((file) => file.originalname));
+    if (photoErrors.length) return res.status(400).json({ error: photoErrors.join(' ') });
 
     const token = await getAccessToken();
     const site = await graph(token, `/sites/${SHAREPOINT_HOSTNAME}:${SHAREPOINT_SITE_PATH}`);

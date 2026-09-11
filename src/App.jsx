@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
 import UploadActivity from './UploadActivity.jsx';
+import { PhotoTile, UnavailablePhoto, usePhotoChecks } from './PhotoCapture.jsx';
+import { MAX_PHOTOS, PHOTO_RULES_VERSION, photoGuidance, qualityResolved, unavailableReason } from './photoRules.js';
 import { getAllLocalPanels, getPendingPanels, markPanelFinalized, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
 
 const JOB_CACHE_PREFIX = 'gen3-panel-jobs:';
@@ -30,20 +32,6 @@ function Header({ step, onHome, onUploads, online, pendingCount, syncing }) {
   );
 }
 
-function PhotoTile({ file, label, onRemove }) {
-  const url = useMemo(() => URL.createObjectURL(file), [file]);
-  useEffect(() => () => URL.revokeObjectURL(url), [url]);
-  return (
-    <div style={{ background: '#fff', border: '1px solid #dbe4ea', borderRadius: 12, padding: 8 }}>
-      <img src={url} alt={label} style={{ width: '100%', height: 170, objectFit: 'cover', borderRadius: 9, background: '#102b47' }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginTop: 7 }}>
-        <small style={{ color: '#607487', fontWeight: 800 }}>{label}</small>
-        <button type="button" onClick={onRemove} style={{ border: 0, background: 'transparent', color: '#9b351c', fontWeight: 800 }}>Remove</button>
-      </div>
-    </div>
-  );
-}
-
 function AddPhotoButton({ children, onFiles, multiple = false }) {
   return (
     <label className="primary" style={{ minHeight: 48, display: 'grid', placeItems: 'center', position: 'relative', width: '100%' }}>
@@ -67,6 +55,19 @@ export default function App() {
   const [leftPhotos, setLeftPhotos] = useState([]);
   const [rightPhotos, setRightPhotos] = useState([]);
   const [directory, setDirectory] = useState(null);
+  const [manufacturerPhoto, setManufacturerPhoto] = useState(null);
+  const [unavailable, setUnavailable] = useState({ manufacturer: { reason: '', details: '' }, directory: { reason: '', details: '' } });
+  const [coverageConfirmed, setCoverageConfirmed] = useState(false);
+  const allPhotos = useMemo(() => [overview, ...leftPhotos, ...rightPhotos, manufacturerPhoto, directory].filter(Boolean), [overview, leftPhotos, rightPhotos, manufacturerPhoto, directory]);
+  const [photoChecks, updatePhotoCheck] = usePhotoChecks(allPhotos);
+  const guidance = photoGuidance(panel.spaces);
+  useEffect(() => { setCoverageConfirmed(false); }, [allPhotos, panel.spaces]);
+  const photoProps = (file) => ({ quality: photoChecks.get(file), onQuality: (patch) => { updatePhotoCheck(file, patch); setCoverageConfirmed(false); } });
+  function clearPhotoDetails() {
+    setManufacturerPhoto(null);
+    setUnavailable({ manufacturer: { reason: '', details: '' }, directory: { reason: '', details: '' } });
+    setCoverageConfirmed(false);
+  }
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
   const [savedRecord, setSavedRecord] = useState(null);
@@ -80,8 +81,11 @@ export default function App() {
   const syncInFlight = useRef(false);
 
   const filteredJobs = jobs.filter((j) => `${j.id} ${j.customer} ${j.address} ${j.summary || ''}`.toLowerCase().includes(query.toLowerCase()));
-  const capturedCount = (overview ? 1 : 0) + leftPhotos.length + rightPhotos.length + (directory ? 1 : 0);
-  const complete = Boolean(overview && leftPhotos.length && rightPhotos.length);
+  const capturedCount = allPhotos.length;
+  const complete = Boolean(overview && leftPhotos.length && rightPhotos.length &&
+    (manufacturerPhoto || unavailableReason(unavailable.manufacturer)) && (directory || unavailableReason(unavailable.directory)) &&
+    capturedCount <= MAX_PHOTOS && coverageConfirmed && allPhotos.every((file) => qualityResolved(photoChecks.get(file))));
+  const qualityExceptions = allPhotos.filter((file) => photoChecks.get(file)?.accepted).length;
 
   const processingPhotoUrls = useMemo(() => {
     const result = {};
@@ -89,8 +93,10 @@ export default function App() {
     leftPhotos.forEach((file, i) => { result[`left-${i + 1}`] = URL.createObjectURL(file); });
     rightPhotos.forEach((file, i) => { result[`right-${i + 1}`] = URL.createObjectURL(file); });
     if (directory) result.directory = URL.createObjectURL(directory);
+    if (manufacturerPhoto) result.manufacturer = URL.createObjectURL(manufacturerPhoto);
     return result;
-  }, [overview, leftPhotos, rightPhotos, directory]);
+  }, [overview, leftPhotos, rightPhotos, directory, manufacturerPhoto]);
+  useEffect(() => () => Object.values(processingPhotoUrls).forEach((url) => URL.revokeObjectURL(url)), [processingPhotoUrls]);
 
   async function refreshLocalPanels() {
     try {
@@ -171,6 +177,7 @@ export default function App() {
   }, [step, jobDate]);
 
   function reset() {
+    clearPhotoDetails();
     setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
     setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setSending(false); setSendError(''); setSavedRecord(null); setProcessing(false); setActivityOpen(false); setLocalNotice('');
   }
@@ -182,23 +189,29 @@ export default function App() {
       { key: 'overview', title: 'Full Panel Overview', status: overview ? 'Captured' : 'Missing' },
       ...leftPhotos.map((_, i) => ({ key: `left-${i + 1}`, title: `Left Breakers ${i + 1}`, status: 'Captured' })),
       ...rightPhotos.map((_, i) => ({ key: `right-${i + 1}`, title: `Right Breakers ${i + 1}`, status: 'Captured' })),
-      { key: 'directory', title: 'Existing Panel Label', status: directory ? 'Captured' : 'Optional / not provided' },
+      ...['manufacturer', 'directory'].map((key) => ({ key, title: key === 'manufacturer' ? 'Manufacturer Label' : 'Existing Panel Directory', status: (key === 'manufacturer' ? manufacturerPhoto : directory) ? 'Captured' : 'Not available', reason: (key === 'manufacturer' ? manufacturerPhoto : directory) ? '' : unavailableReason(unavailable[key]) })),
     ];
-    const record = { recordId, capturedAt, capturedBy: '', job, panel, capturedCount, skippedCount: directory ? 0 : 1, skippedPhotos: directory ? {} : { directory: 'Optional / not provided' }, photoSteps: photoManifest };
+    const skippedPhotos = Object.fromEntries(photoManifest.filter((item) => item.status === 'Not available').map((item) => [item.key, item.reason]));
+    const record = { recordId, capturedAt, capturedBy: '', job, panel, capturedCount, skippedCount: Object.keys(skippedPhotos).length, skippedPhotos, photoSteps: photoManifest,
+      photoRulesVersion: PHOTO_RULES_VERSION, photoGuidance: guidance, coverageConfirmed, qualityExceptions };
     const photos = [];
     const add = (key, file, sort) => {
       if (!file) return;
       const extension = file.name?.includes('.') ? file.name.split('.').pop() : 'jpg';
-      photos.push({ file, name: `${String(sort).padStart(2, '0')}-${key}.${extension}`, type: file.type || 'image/jpeg' });
+      const name = `${String(sort).padStart(2, '0')}-${key}.${extension}`;
+      photos.push({ file, name, type: file.type || 'image/jpeg' });
+      Object.assign(photoManifest.find((item) => item.key === key), { filename: name, quality: photoChecks.get(file) });
     };
     add('overview', overview, 1);
     leftPhotos.forEach((file, i) => add(`left-${i + 1}`, file, 10 + i));
     rightPhotos.forEach((file, i) => add(`right-${i + 1}`, file, 30 + i));
+    add('manufacturer', manufacturerPhoto, 80);
     add('directory', directory, 90);
     return { recordId, record, photos, savedLocallyAt: new Date().toISOString() };
   }
 
   async function saveAndSend() {
+    if (!complete || sending) return;
     setSending(true);
     setSendError('');
     setLocalNotice('');
@@ -228,6 +241,7 @@ export default function App() {
   }
 
   function resetAfterLocalSave() {
+    clearPhotoDetails();
     setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setStep(0); setJob(null);
   }
 
@@ -311,10 +325,11 @@ export default function App() {
             <div className="jobBanner"><strong>{job.customer}</strong><span>{job.address}</span><small>Job #{job.id}</small></div>
             <div className="formGrid">
               <label>Panel name<input value={panel.name} onChange={(e) => setPanel({ ...panel, name: e.target.value })} /></label>
-              <label>Approx. spaces<input inputMode="numeric" value={panel.spaces} onChange={(e) => setPanel({ ...panel, spaces: e.target.value })} placeholder="30" /></label>
+              <label>Approx. breaker spaces (optional)<input inputMode="numeric" value={panel.spaces} onChange={(e) => setPanel({ ...panel, spaces: e.target.value })} placeholder="e.g. 12, 30, 42 — blank if unknown" /></label>
               <label>Manufacturer (optional)<select value={panel.manufacturer} onChange={(e) => setPanel({ ...panel, manufacturer: e.target.value })}>{manufacturers.map((m) => <option key={m}>{m}</option>)}</select></label>
               <label>Main breaker amps (optional)<input inputMode="numeric" value={panel.mainAmps} onChange={(e) => setPanel({ ...panel, mainAmps: e.target.value })} placeholder="200" /></label>
             </div>
+            <div className="tips"><strong>Photo plan</strong><span>{guidance.text}</span><span>Count physical spaces, including blanks. Photograph tandem markings closely.</span></div>
             <div className="bottomActions"><button className="secondary" onClick={() => setStep(1)}>Back</button><button className="primary" onClick={() => setStep(3)}>Take Photos</button></div>
           </section>
         )}
@@ -323,13 +338,18 @@ export default function App() {
           <section>
             <p className="eyebrow">3 · Panel photos</p><h1>Photograph what the AI needs.</h1>
             <p className="lead compact">Complete breaker coverage matters more than a fixed photo count. Photos stay on this device until a confirmed upload succeeds.</p>
+            <div className="photoPlan"><strong>{guidance.spaces ? `${guidance.spaces}-space panel` : 'Panel size unknown'}</strong><p>{guidance.text}</p><span>Also capture an overview and the manufacturer and directory labels, or record why each label is unavailable.</span></div>
             <div style={{ display: 'grid', gap: 18 }}>
-              <div className="completionCard" style={{ display: 'grid' }}><div><strong>1. Full panel overview</strong><span>One photo showing the whole open panel.</span></div>{overview ? <PhotoTile file={overview} label="Overview" onRemove={() => setOverview(null)} /> : <AddPhotoButton onFiles={(files) => setOverview(files[0] || null)}>Take overview photo</AddPhotoButton>}</div>
-              <div className="completionCard" style={{ display: 'grid' }}><div><strong>2. Left-side breakers</strong><span>Take as many close-ups as needed from top to bottom. Overlap slightly.</span></div>{leftPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 }}>{leftPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} label={`Left ${i + 1}`} onRemove={() => setLeftPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}<AddPhotoButton multiple onFiles={(files) => setLeftPhotos((p) => [...p, ...files])}>+ Add left breaker photo</AddPhotoButton></div>
-              <div className="completionCard" style={{ display: 'grid' }}><div><strong>3. Right-side breakers</strong><span>Take as many close-ups as needed. Make breaker labels readable.</span></div>{rightPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 }}>{rightPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} label={`Right ${i + 1}`} onRemove={() => setRightPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}<AddPhotoButton multiple onFiles={(files) => setRightPhotos((p) => [...p, ...files])}>+ Add right breaker photo</AddPhotoButton></div>
-              <div className="completionCard" style={{ display: 'grid' }}><div><strong>4. Existing panel label</strong><span>Optional.</span></div>{directory ? <PhotoTile file={directory} label="Existing label" onRemove={() => setDirectory(null)} /> : <AddPhotoButton onFiles={(files) => setDirectory(files[0] || null)}>Add optional label photo</AddPhotoButton>}</div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>1. Full panel overview</strong><span>One photo showing the whole open panel.</span></div>{overview ? <PhotoTile file={overview} {...photoProps(overview)} label="Overview" onRemove={() => setOverview(null)} /> : <AddPhotoButton onFiles={(files) => setOverview(files[0] || null)}>Take overview photo</AddPhotoButton>}</div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>2. Left-side breakers</strong><span>{leftPhotos.length} taken{guidance.perSide ? ` · Suggested: ${guidance.perSide}` : ''}. Cover the full left column, top to bottom. Overlap slightly.</span></div>{leftPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 8 }}>{leftPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} {...photoProps(file)} label={`Left ${i + 1}`} onRemove={() => setLeftPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}<AddPhotoButton multiple onFiles={(files) => setLeftPhotos((p) => [...p, ...files])}>+ Add left breaker photo</AddPhotoButton></div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>3. Right-side breakers</strong><span>{rightPhotos.length} taken{guidance.perSide ? ` · Suggested: ${guidance.perSide}` : ''}. Cover the full right column. Make breaker markings readable.</span></div>{rightPhotos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 8 }}>{rightPhotos.map((file, i) => <PhotoTile key={`${file.name}-${i}`} file={file} {...photoProps(file)} label={`Right ${i + 1}`} onRemove={() => setRightPhotos((p) => p.filter((_, n) => n !== i))} />)}</div>}<AddPhotoButton multiple onFiles={(files) => setRightPhotos((p) => [...p, ...files])}>+ Add right breaker photo</AddPhotoButton></div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>4. Manufacturer label</strong><span>Show the brand, model, and ratings label. If unavailable, select a reason.</span></div>{manufacturerPhoto ? <PhotoTile file={manufacturerPhoto} {...photoProps(manufacturerPhoto)} label="Manufacturer label" onRemove={() => setManufacturerPhoto(null)} /> : <><AddPhotoButton onFiles={(files) => { setManufacturerPhoto(files[0] || null); setUnavailable((p) => ({ ...p, manufacturer: { reason: '', details: '' } })); }}>Take manufacturer label photo</AddPhotoButton><UnavailablePhoto label="Manufacturer" value={unavailable.manufacturer} onChange={(value) => setUnavailable((p) => ({ ...p, manufacturer: value }))} /></>}</div>
+              <div className="completionCard" style={{ display: 'grid' }}><div><strong>5. Existing panel directory</strong><span>Show the written circuit list. If unavailable, select a reason.</span></div>{directory ? <PhotoTile file={directory} {...photoProps(directory)} label="Existing directory" onRemove={() => setDirectory(null)} /> : <><AddPhotoButton onFiles={(files) => { setDirectory(files[0] || null); setUnavailable((p) => ({ ...p, directory: { reason: '', details: '' } })); }}>Take directory photo</AddPhotoButton><UnavailablePhoto label="Directory" value={unavailable.directory} onChange={(value) => setUnavailable((p) => ({ ...p, directory: value }))} /></>}</div>
             </div>
-            <div className="tips"><strong>Minimum needed</strong><span>1 overview + at least 1 left-side photo + at least 1 right-side photo. Larger panels can use as many as needed.</span></div>
+            <div className="tips"><strong>Check before leaving the panel</strong><span>Automatic checks screen for blur, glare, darkness, and low detail. They cannot confirm that text is readable. Enlarge photos to check the lettering.</span></div>
+            <label className="photoCheck coverageCheck"><input type="checkbox" checked={coverageConfirmed} onChange={(e) => setCoverageConfirmed(e.target.checked)} />I checked top-to-bottom coverage on both sides and can read the markings and labels, except photos flagged for review.</label>
+            {!complete && <p className="photoHelp" role="status">To continue: add an overview and both breaker sides, photograph both labels or give reasons, resolve photo warnings, and confirm coverage.</p>}
+            {capturedCount > MAX_PHOTOS && <p className="sendError" role="alert">{capturedCount} photos selected. Remove duplicates to stay within the {MAX_PHOTOS}-photo upload limit.</p>}
             <div className="bottomActions"><button className="secondary" onClick={() => setStep(2)}>Back</button><button className="primary" disabled={!complete} onClick={() => setStep(4)}>Review Photos</button></div>
           </section>
         )}
@@ -337,7 +357,8 @@ export default function App() {
         {step === 4 && (
           <section>
             <p className="eyebrow">4 · Save & process</p><h1>{online ? 'Ready to upload.' : 'Ready to save offline.'}</h1>
-            <div className="completionCard"><div className="completionNumber">{capturedCount}</div><div><strong>Photos captured</strong><span>Overview: yes · Left: {leftPhotos.length} · Right: {rightPhotos.length} · Existing label: {directory ? 'yes' : 'optional'}</span></div></div>
+            <div className="completionCard"><div className="completionNumber">{capturedCount}</div><div><strong>Photos captured</strong><span>Overview: yes · Left: {leftPhotos.length} · Right: {rightPhotos.length} · Manufacturer: {manufacturerPhoto ? 'photo' : unavailableReason(unavailable.manufacturer)} · Directory: {directory ? 'photo' : unavailableReason(unavailable.directory)}</span></div></div>
+            <div className="tips"><strong>Photo review saved with this record</strong><span>Coverage confirmed · {qualityExceptions} photo{qualityExceptions === 1 ? '' : 's'} flagged for review. Label-unavailable reasons and quality results will be saved with the photos.</span></div>
             <div className="infoStrip"><strong>{online ? 'Online:' : 'Offline:'}</strong> {online ? 'The app saves locally first, uploads to SharePoint, then clears the local photo blobs only after the server confirms success.' : 'The full panel record and photos will remain on this phone and automatically upload when service returns.'}</div>
             <div className="bottomActions"><button className="secondary" onClick={() => setStep(3)}>Back</button><button className="primary sendButton" disabled={!complete || sending} onClick={saveAndSend}>{sending ? 'Saving…' : online ? 'Save, Upload & Build Label' : 'Save Offline'}</button></div>
             {sendError && <div className="sendError" role="alert"><strong>Panel remains saved locally</strong><span>{sendError}</span><button type="button" onClick={saveAndSend}>Try again</button></div>}

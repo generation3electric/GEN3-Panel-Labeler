@@ -73,8 +73,8 @@ export async function analyzePanelPhotos({ files, record }) {
     throw error;
   }
 
-  const manifest = (record.photoSteps || []).map((item) => `${item.key}: ${item.title}`).join('\n');
-  const prompt = `You are analyzing photographs of one residential electrical panel for a professional panel directory.\n\nUse ALL photos together. The left and right close-ups may overlap. Deduplicate breakers seen in overlapping images. Use the full-panel overview to establish physical order and use the close-ups to read breaker handles, breaker markings, and stickers or handwritten circuit descriptions beside each breaker.\n\nNever invent a circuit description, amperage, breaker type, manufacturer, or position. If text or a breaker is unclear, leave nullable fields null, use an empty description when unreadable, reduce confidence, and set needsReview=true. Treat odd-numbered circuits as the left side and even-numbered circuits as the right side when the physical panel follows that standard; if the photos clearly show a different numbering scheme, follow what is visible. For 2-pole breakers, identify the first circuit position and poles=2.\n\nNormalize breakerType to standard, afci, gfci, dual, surge, or unknown. Preserve useful circuit wording from stickers, but clean obvious OCR noise and capitalization.\n\nPanel setup supplied by technician:\n${JSON.stringify(record.panel || {})}\n\nPhoto manifest:\n${manifest}\n\nReturn the complete best proposed directory and flag every uncertain item for human verification.`;
+  const manifest = (record.photoSteps || []).map((item) => `${item.key}: ${item.title} — ${item.status || 'Captured'}${item.reason ? `; reason: ${item.reason}` : ''}${item.quality ? `; quality: ${JSON.stringify(item.quality)}` : ''}`).join('\n');
+  const prompt = `You are analyzing photographs of one residential electrical panel for a professional panel directory.\n\nUse ALL photos together. The left and right close-ups may overlap. Deduplicate breakers seen in overlapping images. Use the full-panel overview to establish physical order and use the close-ups to read breaker handles, breaker markings, and stickers or handwritten circuit descriptions beside each breaker.\n\nNever invent a circuit description, amperage, breaker type, manufacturer, or position. If text or a breaker is unclear, leave nullable fields null, use an empty description when unreadable, reduce confidence, and set needsReview=true. Treat odd-numbered circuits as the left side and even-numbered circuits as the right side when the physical panel follows that standard; if the photos clearly show a different numbering scheme, follow what is visible. For 2-pole breakers, identify the first circuit position and poles=2.\n\nNormalize breakerType to standard, afci, gfci, dual, surge, or unknown. Preserve useful circuit wording from stickers, but clean obvious OCR noise and capitalization.\n\nPanel setup supplied by technician:\n${JSON.stringify(record.panel || {})}\n\nPhoto manifest:\n${manifest}\n\nCheck each image for blur, glare, unreadable text, and incomplete breaker coverage. Name the photo and affected positions in warnings. These local quality screens are heuristic, not proof of legibility. Respect technician best-available exceptions, keep uncertain circuit readings marked needsReview, and never infer missing label text.\n\nReturn the complete best proposed directory and flag every uncertain item for human verification.`;
 
   const body = {
     model: process.env.OPENAI_PANEL_MODEL || 'gpt-5.6-terra',
@@ -83,7 +83,7 @@ export async function analyzePanelPhotos({ files, record }) {
       role: 'user',
       content: [
         { type: 'input_text', text: prompt },
-        ...files.map(imagePart),
+        ...files.flatMap((file) => [{ type: 'input_text', text: `Photo: ${file.originalname || 'unnamed'}` }, imagePart(file)]),
       ],
     }],
     text: {
@@ -116,6 +116,11 @@ export async function analyzePanelPhotos({ files, record }) {
   let analysis;
   try { analysis = JSON.parse(text); }
   catch { throw new Error('OpenAI panel analysis was not valid JSON.'); }
+  const fieldWarnings = (record.photoSteps || [])
+    .filter((item) => item.quality?.accepted)
+    .map((item) => `${item.title || item.key}: technician kept best available photo for review — ${item.quality.reason || 'quality uncertain'}.`);
+  const unavailableWarnings = Object.entries(record.skippedPhotos || {}).map(([key, reason]) => `${key} photo not available: ${reason}.`);
+  analysis.warnings = [...new Set([...(Array.isArray(analysis.warnings) ? analysis.warnings : []), ...fieldWarnings, ...unavailableWarnings])];
   return {
     analysis,
     model: data.model || body.model,
