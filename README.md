@@ -7,7 +7,10 @@ Mobile-first field workflow for collecting the information and photos needed to 
 - Select a live ServiceTitan appointment and its linked job, customer, and service location
 - Confirm customer/location information
 - Identify panel name/manufacturer/main breaker/spaces/existing label quality
-- Guided required photo sequence
+- Panel-size photo guidance: about seven breaker spaces per close-up per side (12 spaces: one per side; 30/42: three per side), with flexible count after coverage confirmation
+- Manufacturer and existing directory photos, or explicit missing/damaged/inaccessible/other reasons
+- Offline image screening for possible blur, glare, darkness, low contrast, and low resolution; enlarge photos to verify readability
+- Best-available photo exceptions require a reason and remain visible in AI review; checks and reasons are saved in the panel record
 - Camera/file capture on mobile
 - Retake photos
 - Completion checklist prevents submission with missing required photos
@@ -55,7 +58,5 @@ npm run build
 
 ## Next milestones
 
-1. Add photo quality checks (blur, glare, framing).
-2. Add additional-photo workflow for unusual panels and large breaker fields.
-3. Add office review for low-confidence AI results.
-4. Generate a typed panel directory / homeowner PDF and retain a permanent digital panel record.
+1. Calibrate local quality thresholds against real field photographs and device cameras. These screens do not perform OCR or prove legibility.
+2. Add office review routing for low-confidence AI results.
