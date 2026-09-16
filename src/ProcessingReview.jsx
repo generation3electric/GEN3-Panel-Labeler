@@ -4,7 +4,7 @@ import PhotoGallery from './PhotoGallery.jsx';
 import ReviewChecklist from './ReviewChecklist.jsx';
 import useReviewProgress from './useReviewProgress.js';
 import { verifyCircuit } from './reviewProgress.js';
-import NumberingOriginSelect from './NumberingOriginSelect.jsx';
+import PanelFlipControl from './PanelFlipControl.jsx';
 import { normalizeNumberingOrigin, numberingLayout, panelDisplayPairs, breakerPlacement, adjacentCircuit } from './panelLayout.js';
 import { buildRowsFromAnalysis, getAIAnalysis } from './panelAnalysis.js';
 
@@ -379,7 +379,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     <main className="content processPage panelReviewPage">
       <div className="panelReviewHeading"><h1>{panel.name || 'Panel review'}</h1><span>{panelManufacturer} · {rows.length} spaces</span></div>
       <div className="panelReviewToolbar">
-        <NumberingOriginSelect value={numberingOrigin} onChange={setNumberingOrigin} />
+        <PanelFlipControl value={numberingOrigin} onChange={setNumberingOrigin} />
         <button className="secondary" type="button" onClick={() => openReview(rows.find((row) => row.confidence === 'Review' && !row.continuationOf)?.circuit || rows[0]?.circuit)}>Review circuits ({rows.filter((row) => row.confidence === 'Review' && !row.continuationOf).length})</button>
         <button className="secondary" type="button" onClick={() => openReview()}>Panel warnings ({analysisWarnings.filter((warning) => !resolutions[warning]).length})</button>
         {gallery}

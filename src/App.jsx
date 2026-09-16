@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
-import NumberingOriginSelect from './NumberingOriginSelect.jsx';
+import PanelFlipControl from './PanelFlipControl.jsx';
 import UploadActivity from './UploadActivity.jsx';
 import PhotoGallery from './PhotoGallery.jsx';
 import { PhotoTile, UnavailablePhoto, usePhotoChecks } from './PhotoCapture.jsx';
@@ -333,7 +333,7 @@ export default function App() {
               <label>Panel name<input value={panel.name} onChange={(e) => setPanel({ ...panel, name: e.target.value })} /></label>
               <label>Approx. breaker spaces (optional)<input inputMode="numeric" value={panel.spaces} onChange={(e) => setPanel({ ...panel, spaces: e.target.value })} placeholder="e.g. 12, 30, 42 — blank if unknown" /></label>
               <label>Manufacturer (optional)<select value={panel.manufacturer} onChange={(e) => setPanel({ ...panel, manufacturer: e.target.value })}>{manufacturers.map((m) => <option key={m}>{m}</option>)}</select></label>
-              <NumberingOriginSelect value={panel.numberingOrigin} onChange={(numberingOrigin) => setPanel({ ...panel, numberingOrigin })} />
+              <PanelFlipControl value={panel.numberingOrigin} onChange={(numberingOrigin) => setPanel({ ...panel, numberingOrigin })} />
               <label>Main breaker amps (optional)<input inputMode="numeric" value={panel.mainAmps} onChange={(e) => setPanel({ ...panel, mainAmps: e.target.value })} placeholder="200" /></label>
             </div>
             <div className="tips"><strong>Photo plan</strong><span>{guidance.text}</span><span>Count physical spaces, including blanks. Photograph tandem markings closely.</span></div>

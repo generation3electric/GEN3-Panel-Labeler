@@ -11,7 +11,7 @@ Mobile-first field workflow for collecting the information and photos needed to 
 - Manufacturer and existing directory photos, or explicit missing/damaged/inaccessible/other reasons
 - Offline image screening for possible blur, glare, darkness, low contrast, and low resolution; enlarge photos to verify readability
 - Best-available photo exceptions require a reason and remain visible in AI review; checks and reasons are saved in the panel record
-- Circuit #1 location selector in panel setup and review (top/bottom, left/right); saves with review progress and final records, controls the physical view and printed directory, and guides AI numbering. Existing records default to top left.
+- One-tap “Flip panel 180°” button in panel setup and review; tap again to flip back. Keeps text upright and circuit descriptions attached, saves with review progress and final records, and updates the physical view and printed directory. Existing saved orientations are preserved until flipped; new records start at top left.
 - Panel-first review screen: tap a breaker’s AI note to edit and verify in a pop-up; compact buttons open remaining panel warnings and photos
 - Actionable review checklist: open referenced photos, correct circuits individually, verify and advance, resolve warnings with notes, and reopen resolved warnings
 - Review corrections and warning resolutions autosave to the device and SharePoint, with visible save/retry status; final records retain the warning-resolution history
