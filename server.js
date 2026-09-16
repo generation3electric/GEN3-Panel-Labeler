@@ -1,6 +1,7 @@
 import express from 'express';
 import { validatePhotoRecord } from './src/photoRules.js';
 import multer from 'multer';
+import { normalizeReviewProgress } from './src/reviewProgress.js';
 import { isPanelPhoto, panelPhotoList } from './src/photoGallery.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -362,6 +363,30 @@ app.get('/api/sharepoint/panel-records/:itemId', async (req, res) => {
     console.error('SharePoint panel detail failed:', { message: error.message, status: error.status });
     res.status(error.status || 500).json({ error: error.message || 'The saved panel record could not be opened.' });
   }
+});
+
+app.get('/api/sharepoint/panel-records/:itemId/review-progress', async (req, res) => {
+  if (!microsoftConfigured()) return res.status(503).json({ error: 'Microsoft connection is not configured.' });
+  try {
+    const token = await getAccessToken();
+    const context = await loadPanelContext(token, req.params.itemId);
+    const file = context.files.find((file) => file.name === `${safeName(context.indexRecord.recordId)}-review-progress.json`);
+    res.set('Cache-Control', 'private, no-store').json({ progress: await loadJsonFile(token, context.drive.id, file) });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
+
+app.put('/api/sharepoint/panel-records/:itemId/review-progress', async (req, res) => {
+  if (!microsoftConfigured()) return res.status(503).json({ error: 'Microsoft connection is not configured.' });
+  try {
+    const token = await getAccessToken();
+    const context = await loadPanelContext(token, req.params.itemId);
+    if (req.body.recordId !== context.indexRecord.recordId) return res.status(400).json({ error: 'Review does not match this panel.' });
+    let progress;
+    try { progress = normalizeReviewProgress(req.body, context.indexRecord.recordId); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+    await uploadFile(token, context.drive.id, context.folder.id, `${safeName(progress.recordId)}-review-progress.json`, Buffer.from(JSON.stringify(progress, null, 2)));
+    res.json({ updatedAt: progress.updatedAt });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 
 app.get('/api/sharepoint/panel-records/:itemId/photos', async (req, res) => {
