@@ -11,7 +11,7 @@ function GalleryImage({ photo }) {
     <img src={photo.url} alt={photo.label} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES, itemId, folderUrl }) {
+export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES, itemId, folderUrl, openPhoto }) {
   const [remotePhotos, setRemotePhotos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -19,6 +19,8 @@ export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES
   const [selected, setSelected] = useState(0);
   const [zoomed, setZoomed] = useState(false);
   const dialog = useRef(null);
+  const openedRequest = useRef(null);
+  const [photoNotice, setPhotoNotice] = useState('');
   const local = useMemo(() => localPhotos.filter((photo) => photo.file instanceof Blob).map((photo) => ({
     id: photo.name, label: photoLabel(photo.name), url: URL.createObjectURL(photo.file),
   })), [localPhotos]);
@@ -44,11 +46,21 @@ export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES
   }, [itemId, hasLocal, attempt]);
 
   const photos = local.length ? local : supplied.length ? supplied : remotePhotos;
+  useEffect(() => {
+    if (!openPhoto || openedRequest.current === openPhoto || loading) return;
+    const label = photoLabel(openPhoto.name);
+    const index = photos.findIndex((photo) => photo.name === openPhoto.name || photo.id === openPhoto.name || photo.label === label);
+    openedRequest.current = openPhoto;
+    if (index < 0) { setPhotoNotice('The referenced photo is unavailable. Check the gallery or SharePoint folder.'); return; }
+    setPhotoNotice(''); setSelected(index); setZoomed(false);
+    if (!dialog.current.open) dialog.current.showModal();
+  }, [openPhoto, photos, loading]);
   const current = photos[selected];
   function move(delta) { setSelected((index) => Math.max(0, Math.min(photos.length - 1, index + delta))); setZoomed(false); }
 
   return <section className="panelPhotoGallery noPrint" aria-label="Panel photos">
     <div className="galleryHeading"><h2>All Photos{photos.length ? ` (${photos.length})` : ''}</h2><span>Tap a photo to enlarge</span></div>
+    {photoNotice && <p role="alert">{photoNotice}</p>}
     {loading && <p role="status">Loading panel photos…</p>}
     {error && <div role="alert"><p>{error}</p><button className="secondary" type="button" onClick={() => setAttempt((value) => value + 1)}>Try again</button></div>}
     {!loading && !error && !photos.length && <p>No photos are available for this panel.</p>}

@@ -1,7 +1,8 @@
 import PDFDocument from 'pdfkit';
+import { normalizeReviewProgress } from './src/reviewProgress.js';
 
 const BREAKER_KINDS = new Set([
-  '1p_unknown', '2p_unknown', '1p_standard', '2p_standard',
+  'empty', '1p_unknown', '2p_unknown', '1p_standard', '2p_standard',
   '1p_afci', '2p_afci', '1p_gfci', '2p_gfci',
   '1p_dual', '2p_dual', '1p_surge', '2p_surge',
 ]);
@@ -63,11 +64,13 @@ export function normalizeVerifiedDirectory(input, now = new Date()) {
       spaces: rows.length,
     },
     circuits: rows,
+    reviewResolutions: normalizeReviewProgress({ rows: input.rows, resolutions: input.reviewResolutions || {} }, recordId).resolutions,
   };
 }
 
 function breakerLabel(row) {
   if (!row) return '';
+  if (row.breakerKind === 'empty') return 'Empty / No breaker';
   const family = row.breakerType === 'unknown' ? 'Verify type' : row.breakerType.toUpperCase();
   return `${row.amps ? `${row.amps}A` : 'Verify amps'} · ${row.poles}P ${family}`;
 }

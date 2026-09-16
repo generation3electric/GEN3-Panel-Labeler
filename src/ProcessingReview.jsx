@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import './ProcessingReview.css';
 import PhotoGallery from './PhotoGallery.jsx';
+import ReviewChecklist from './ReviewChecklist.jsx';
+import useReviewProgress from './useReviewProgress.js';
+import { verifyCircuit } from './reviewProgress.js';
 import { buildRowsFromAnalysis, getAIAnalysis } from './panelAnalysis.js';
 
 const commonCircuits = [
@@ -47,17 +50,20 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   const previousFinalization = savedRecord?.finalization || savedRecord?.receipt?.finalization || null;
   const [phase, setPhase] = useState(() => (previousFinalization ? 'final' : analysis ? 'review' : 'ready'));
   const [rows, setRows] = useState(() => previousFinalization?.rows || normalized.rows);
+  const [resolutions, setResolutions] = useState(() => previousFinalization?.reviewResolutions || {});
+  const [openPhoto, setOpenPhoto] = useState(null);
+  const progress = useReviewProgress({ itemId: savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId, recordId: savedRecord?.recordId || savedRecord?.receipt?.recordId, rows, resolutions, setRows, setResolutions, finalizedAt: previousFinalization?.verifiedAt });
   const [labelQueries, setLabelQueries] = useState({});
   const [verifierName, setVerifierName] = useState(() => previousFinalization?.verifiedBy || localStorage.getItem('gen3-panel-verifier-name') || '');
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState('');
   const [finalReceipt, setFinalReceipt] = useState(previousFinalization);
-  const analysisWarnings = [...(Array.isArray(analysis?.warnings) ? analysis.warnings : []), ...normalized.warnings];
+  const analysisWarnings = [...new Set([...(Array.isArray(analysis?.warnings) ? analysis.warnings : []), ...normalized.warnings].map(String))];
   const analyzedPanel = analysis?.panel || {};
   const panelManufacturer = panel.manufacturer && panel.manufacturer !== 'Unknown' ? panel.manufacturer : analyzedPanel.manufacturer || 'Verify';
   const panelMainAmps = panel.mainAmps || analyzedPanel.mainAmps || null;
 
-  const gallery = <PhotoGallery key={savedRecord?.recordId || 'current'} photoUrls={photoUrls} itemId={savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId} folderUrl={savedRecord?.folderUrl} />;
+  const gallery = <PhotoGallery key={savedRecord?.recordId || 'current'} photoUrls={photoUrls} openPhoto={openPhoto} itemId={savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId} folderUrl={savedRecord?.folderUrl} />;
 
   function runPreview() {
     setPhase('review');
@@ -86,6 +92,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           job,
           panel: { ...panel, manufacturer: panelManufacturer, mainAmps: panelMainAmps },
           rows,
+          reviewResolutions: resolutions,
         }),
       });
       const result = await response.json();
@@ -104,7 +111,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   function updateCircuit(circuit, key, value) {
     setRows((current) => current.map((row) => {
-      if (row.circuit === circuit || row.continuationOf === circuit) return { ...row, [key]: value };
+      if (row.circuit === circuit || row.continuationOf === circuit) return { ...row, [key]: value, confidence: 'Review' };
       return row;
     }));
   }
@@ -116,7 +123,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       const parts = existing.split(',').map((part) => part.trim().toLowerCase()).filter(Boolean);
       if (parts.includes(label.toLowerCase())) return row;
       const next = existing ? `${existing}, ${label}` : label;
-      return { ...row, description: next.slice(0, 280) };
+      return { ...row, description: next.slice(0, 280), confidence: 'Review' };
     }));
   }
 
@@ -129,10 +136,10 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       return current.map((row) => {
         if (row.circuit === circuit) {
           if (breakerKind === 'empty') return { ...row, amps: null, description: '', breakerKind, confidence: 'Verified', notes: 'Marked empty during verification' };
-          return { ...row, breakerKind };
+          return { ...row, breakerKind, confidence: 'Review' };
         }
         if (poles === 2 && next && row.circuit === next.circuit) {
-          return { ...row, continuationOf: circuit, amps: target.amps, description: target.description, breakerKind, confidence: target.confidence };
+          return { ...row, continuationOf: circuit, amps: target.amps, description: target.description, breakerKind, confidence: 'Review' };
         }
         if (poles === 1 && row.continuationOf === circuit) {
           return { ...row, continuationOf: null, description: '', breakerKind: '1p_standard', confidence: 'Review' };
@@ -176,6 +183,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
         const other = row.circuit === circuit ? destination : source;
         const swapped = { ...row, continuationOf: null };
         fields.forEach((field) => { swapped[field] = other[field]; });
+        swapped.confidence = 'Review';
         return swapped;
       });
     });
@@ -183,7 +191,6 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   const byCircuit = Object.fromEntries(rows.map((row) => [row.circuit, row]));
   const physicalRows = Math.ceil(rows.length / 2);
-  const reviewCount = rows.filter((r) => r.confidence === 'Review' && !r.continuationOf).length;
 
   function renderSide(circuit, side) {
     const row = byCircuit[circuit];
@@ -266,7 +273,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     const odd = rows.filter((r) => r.circuit % 2 === 1 && !r.continuationOf);
     const even = rows.filter((r) => r.circuit % 2 === 0 && !r.continuationOf);
     return (
-      <div className="cleanPanelGrid" style={{ '--panel-rows': physicalRows }}>
+      <div className="panelGridScroll"><div className="cleanPanelGrid" style={{ '--panel-rows': physicalRows }}>
         <div className="panelGridHeader leftDescHead">ODD / LEFT</div>
         <div className="panelGridHeader leftAmpHead">BREAKER</div>
         <div className="panelCenterLine" />
@@ -274,7 +281,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
         <div className="panelGridHeader rightDescHead">EVEN / RIGHT</div>
         {odd.map((row) => renderSide(row.circuit, 'left'))}
         {even.map((row) => renderSide(row.circuit, 'right'))}
-      </div>
+      </div></div>
     );
   }
 
@@ -309,6 +316,8 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       </section>
     );
   }
+
+  if (!progress.ready) return <main className="content"><p role="status">Loading saved review progress…</p></main>;
 
   if (phase === 'ready') {
     return (
@@ -356,8 +365,12 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
         <span>{panelManufacturer} · {panelMainAmps ? `${panelMainAmps}A main` : 'main amps need verification'} · {rows.length} spaces{Number.isFinite(Number(analyzedPanel.confidence)) ? ` · ${Math.round(Number(analyzedPanel.confidence) * 100)}% panel confidence` : ''}</span>
         {savedRecord?.aiModel && <small>Analyzed by {savedRecord.aiModel}</small>}
       </div>
-      <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Yellow items are low-confidence, incomplete, or missing from the AI reading. Correct them before generating the directory.</span></div>
-      {analysisWarnings.length > 0 && <div className="analysisWarnings"><strong>AI warnings</strong><ul>{analysisWarnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></div>}
+      <div className="reviewSaveStatus" role="status">{progress.status} <button type="button" className="secondary" onClick={progress.retry}>Save progress</button></div>
+      <ReviewChecklist rows={rows} warnings={analysisWarnings} resolutions={resolutions} kinds={breakerKinds}
+        onResolve={(warning,note) => setResolutions((current) => ({ ...current, [warning]: { note: note.trim(), resolvedAt: new Date().toISOString() } }))}
+        onReopen={(warning) => setResolutions((current) => { const next = { ...current }; delete next[warning]; return next; })}
+        onPhoto={(name) => setOpenPhoto({ name, request: Date.now() })}
+        onUpdate={updateCircuit} onKind={changeBreakerKind} onVerify={(circuit) => setRows(verifyCircuit(rows,circuit))} />
       {gallery}
       <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
       {PhysicalPanel()}
