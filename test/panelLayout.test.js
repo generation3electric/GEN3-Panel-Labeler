@@ -1,11 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { NUMBERING_ORIGINS, normalizeNumberingOrigin, panelDisplayPairs, breakerPlacement, adjacentCircuit } from '../src/panelLayout.js';
+import { NUMBERING_ORIGINS, normalizeNumberingOrigin, flipNumberingOrigin, panelDisplayPairs, breakerPlacement, adjacentCircuit } from '../src/panelLayout.js';
 import { normalizeReviewProgress } from '../src/reviewProgress.js';
 import { normalizeVerifiedDirectory } from '../finalDirectory.js';
 import { buildRowsFromAnalysis } from '../src/panelAnalysis.js';
 
 const rows = Array.from({length: 8}, (_,i) => ({ circuit: i+1, description:`Circuit ${i+1}`, amps:20, breakerKind:'1p_standard', confidence:'Review' }));
+
+test('flip rotates both axes by 180 degrees and a second tap restores the saved layout', () => {
+ assert.equal(flipNumberingOrigin(undefined),'bottom-right');
+ for (const {value} of NUMBERING_ORIGINS) {
+  const before = panelDisplayPairs(30,value);
+  const flipped = flipNumberingOrigin(value);
+  assert.deepEqual(panelDisplayPairs(30,flipped), before.toReversed().map(({left,right}) => ({left:right,right:left})));
+  assert.equal(flipNumberingOrigin(flipped),value);
+ }
+});
 
 test('four origins place circuit 1 in the selected corner without changing identities', () => {
  const expected = {

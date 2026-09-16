@@ -9,6 +9,12 @@ export function normalizeNumberingOrigin(value) {
   return NUMBERING_ORIGINS.some((item) => item.value === value) ? value : 'top-left';
 }
 
+// Rotate the existing layout so saved panels retain their orientation until flipped.
+export function flipNumberingOrigin(value) {
+  const { bottomUp, oddLeft } = numberingLayout(value);
+  return `${bottomUp ? 'top' : 'bottom'}-${oddLeft ? 'right' : 'left'}`;
+}
+
 export function numberingLayout(value) {
   const origin = normalizeNumberingOrigin(value);
   return { origin, bottomUp: origin.startsWith('bottom-'), oddLeft: origin.endsWith('-left'),
