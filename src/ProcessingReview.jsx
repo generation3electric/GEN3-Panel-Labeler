@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './ProcessingReview.css';
 import PhotoGallery from './PhotoGallery.jsx';
 import ReviewChecklist from './ReviewChecklist.jsx';
@@ -52,6 +52,19 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   const [rows, setRows] = useState(() => previousFinalization?.rows || normalized.rows);
   const [resolutions, setResolutions] = useState(() => previousFinalization?.reviewResolutions || {});
   const [openPhoto, setOpenPhoto] = useState(null);
+  const [reviewTarget, setReviewTarget] = useState(null);
+  const reviewDialog = useRef(null);
+  useEffect(() => {
+    if (!reviewTarget || !reviewDialog.current) return;
+    const popup = reviewDialog.current;
+    popup.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; if (popup.open) popup.close(); };
+  }, [reviewTarget]);
+  function openReview(circuit = null) { setReviewTarget({ circuit }); }
+  function closeReview() { reviewDialog.current?.close(); }
+
   const progress = useReviewProgress({ itemId: savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId, recordId: savedRecord?.recordId || savedRecord?.receipt?.recordId, rows, resolutions, setRows, setResolutions, finalizedAt: previousFinalization?.verifiedAt });
   const [labelQueries, setLabelQueries] = useState({});
   const [verifierName, setVerifierName] = useState(() => previousFinalization?.verifiedBy || localStorage.getItem('gen3-panel-verifier-name') || '');
@@ -63,7 +76,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   const panelManufacturer = panel.manufacturer && panel.manufacturer !== 'Unknown' ? panel.manufacturer : analyzedPanel.manufacturer || 'Verify';
   const panelMainAmps = panel.mainAmps || analyzedPanel.mainAmps || null;
 
-  const gallery = <PhotoGallery key={savedRecord?.recordId || 'current'} photoUrls={photoUrls} openPhoto={openPhoto} itemId={savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId} folderUrl={savedRecord?.folderUrl} />;
+  const gallery = <PhotoGallery key={savedRecord?.recordId || 'current'} photoUrls={photoUrls} compact={phase === 'review'} openPhoto={openPhoto} itemId={savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId} folderUrl={savedRecord?.folderUrl} />;
 
   function runPreview() {
     setPhase('review');
@@ -242,7 +255,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
             </details>
             <span>{row.description.length}/280</span>
           </div>
-          {row.confidence === 'Review' && <span className="reviewFlag" title={row.notes || undefined}>{row.notes ? 'Review AI note' : 'Needs review'}</span>}
+          <button type="button" className={`reviewFlag ${row.confidence === 'Review' ? '' : 'reviewFlagComplete'}`} onClick={() => openReview(row.circuit)} aria-label={`Review circuit ${row.circuit} AI note`}>{row.confidence === 'Review' ? (row.notes ? 'Review AI note' : 'Review circuit') : row.confidence === 'Verified' ? '✓ Verified' : 'AI note'}</button>
         </div>
         <div
           className={`breakerTile ${side} family-${kind.family} ${row.confidence === 'Review' ? 'needsReview' : ''} ${kind.poles === 2 ? 'twoPole' : ''}`}
@@ -358,21 +371,24 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
 
   return (
     <main className="content processPage panelReviewPage">
-      <p className="eyebrow">AI verification</p>
-      <h1>Verify the panel the way it is physically laid out.</h1>
-      <div className="analysisSummary">
-        <strong>AI result loaded</strong>
-        <span>{panelManufacturer} · {panelMainAmps ? `${panelMainAmps}A main` : 'main amps need verification'} · {rows.length} spaces{Number.isFinite(Number(analyzedPanel.confidence)) ? ` · ${Math.round(Number(analyzedPanel.confidence) * 100)}% panel confidence` : ''}</span>
-        {savedRecord?.aiModel && <small>Analyzed by {savedRecord.aiModel}</small>}
+      <div className="panelReviewHeading"><h1>{panel.name || 'Panel review'}</h1><span>{panelManufacturer} · {rows.length} spaces</span></div>
+      <div className="panelReviewToolbar">
+        <button className="secondary" type="button" onClick={() => openReview(rows.find((row) => row.confidence === 'Review' && !row.continuationOf)?.circuit || rows[0]?.circuit)}>Review circuits ({rows.filter((row) => row.confidence === 'Review' && !row.continuationOf).length})</button>
+        <button className="secondary" type="button" onClick={() => openReview()}>Panel warnings ({analysisWarnings.filter((warning) => !resolutions[warning]).length})</button>
+        {gallery}
       </div>
-      <div className="reviewSaveStatus" role="status">{progress.status} <button type="button" className="secondary" onClick={progress.retry}>Save progress</button></div>
-      <ReviewChecklist rows={rows} warnings={analysisWarnings} resolutions={resolutions} kinds={breakerKinds}
-        onResolve={(warning,note) => setResolutions((current) => ({ ...current, [warning]: { note: note.trim(), resolvedAt: new Date().toISOString() } }))}
-        onReopen={(warning) => setResolutions((current) => { const next = { ...current }; delete next[warning]; return next; })}
-        onPhoto={(name) => setOpenPhoto({ name, request: Date.now() })}
-        onUpdate={updateCircuit} onKind={changeBreakerKind} onVerify={(circuit) => setRows(verifyCircuit(rows,circuit))} />
-      {gallery}
-      <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
+      <div className="reviewSaveLine"><span role="status">{progress.status}</span><button type="button" onClick={progress.retry}>Save</button></div>
+      <dialog ref={reviewDialog} className="panelReviewDialog" aria-labelledby="review-popup-title" onClose={() => setReviewTarget(null)}>
+        <header className="reviewPopupHeader"><h2 id="review-popup-title">Review & correct</h2><button type="button" className="secondary" autoFocus onClick={closeReview}>Close</button></header>
+        <div className="reviewPopupBody">
+          {reviewTarget && <ReviewChecklist initialCircuit={reviewTarget.circuit} rows={rows} warnings={analysisWarnings} resolutions={resolutions} kinds={breakerKinds} onDone={closeReview}
+            onResolve={(warning,note) => setResolutions((current) => ({ ...current, [warning]: { note: note.trim(), resolvedAt: new Date().toISOString() } }))}
+            onReopen={(warning) => setResolutions((current) => { const next = { ...current }; delete next[warning]; return next; })}
+            onPhoto={(name) => setOpenPhoto({ name, request: Date.now() })}
+            onUpdate={updateCircuit} onKind={changeBreakerKind} onVerify={(circuit) => setRows(verifyCircuit(rows,circuit))} />}
+        </div>
+        <footer className="reviewPopupFooter" role="status">{progress.status}</footer>
+      </dialog>
       {PhysicalPanel()}
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
       {DirectoryPreview()}
