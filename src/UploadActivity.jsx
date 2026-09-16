@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import PhotoGallery from './PhotoGallery.jsx';
 import { splitLocalPanels } from './offlineQueue.js';
 
 function formatDate(value) {
@@ -8,7 +9,7 @@ function formatDate(value) {
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-function PanelCard({ item, online, busy, onUpload, onReview }) {
+function PanelCard({ item, online, busy, onUpload, onReview, onPhotos }) {
   const job = item.record?.job || {};
   const panel = item.record?.panel || {};
   const uploaded = item.status === 'uploaded';
@@ -26,6 +27,7 @@ function PanelCard({ item, online, busy, onUpload, onReview }) {
         <span><b>Panel</b>{panel.name || 'Panel'}</span>
         <span><b>Photos</b>{item.record?.capturedCount ?? item.photos?.length ?? '—'}</span>
       </div>
+      <button className="secondary uploadCardAction" type="button" onClick={() => onPhotos(item)}>View All Photos</button>
       {uploaded || finalized ? (
         <button className="primary uploadCardAction" onClick={() => onReview(item)}>{finalized ? 'Open Final Directory' : 'Review AI Results'} <span aria-hidden="true">›</span></button>
       ) : (
@@ -39,6 +41,8 @@ function PanelCard({ item, online, busy, onUpload, onReview }) {
 
 export default function UploadActivity({ items, online, syncing, onBack, onRefresh, onUpload, onReview }) {
   const { pending, uploaded } = useMemo(() => splitLocalPanels(items), [items]);
+  const [photosId, setPhotosId] = useState(null);
+  const photosItem = items.find((item) => item.recordId === photosId);
   const [uploadingId, setUploadingId] = useState('');
   const [error, setError] = useState('');
 
@@ -53,6 +57,12 @@ export default function UploadActivity({ items, online, syncing, onBack, onRefre
       setUploadingId('');
     }
   }
+
+  if (photosItem) return <main className="content uploadActivityPage">
+    <button className="activityBack" type="button" onClick={() => setPhotosId(null)}>← Pending / Recently Uploaded</button>
+    <h1>Panel Photos</h1><p>{photosItem.record?.job?.address} · {photosItem.record?.panel?.name}</p>
+    <PhotoGallery key={photosItem.recordId} localPhotos={photosItem.photos} itemId={photosItem.receipt?.listItemId} folderUrl={photosItem.receipt?.folderUrl} />
+  </main>;
 
   return (
     <main className="content uploadActivityPage">
@@ -71,14 +81,14 @@ export default function UploadActivity({ items, online, syncing, onBack, onRefre
       <section className="activitySection">
         <div className="activitySectionTitle"><div><span>Waiting on this device</span><strong>Pending</strong></div><b>{pending.length}</b></div>
         {pending.length === 0 ? <div className="activityEmpty">No panels are waiting to upload.</div> : (
-          <div className="uploadList">{pending.map((item) => <PanelCard key={item.recordId} item={item} online={online} busy={uploadingId === item.recordId} onUpload={upload} onReview={onReview} />)}</div>
+          <div className="uploadList">{pending.map((item) => <PanelCard key={item.recordId} item={item} online={online} busy={uploadingId === item.recordId} onUpload={upload} onReview={onReview} onPhotos={(item) => setPhotosId(item.recordId)} />)}</div>
         )}
       </section>
 
       <section className="activitySection">
         <div className="activitySectionTitle"><div><span>Uploaded from this device</span><strong>Recently Uploaded</strong></div><b>{uploaded.length}</b></div>
         {uploaded.length === 0 ? <div className="activityEmpty">Uploaded panels will appear here, ready to reopen.</div> : (
-          <div className="uploadList">{uploaded.map((item) => <PanelCard key={item.recordId} item={item} online={online} busy={false} onUpload={upload} onReview={onReview} />)}</div>
+          <div className="uploadList">{uploaded.map((item) => <PanelCard key={item.recordId} item={item} online={online} busy={false} onUpload={upload} onReview={onReview} onPhotos={(item) => setPhotosId(item.recordId)} />)}</div>
         )}
       </section>
     </main>
