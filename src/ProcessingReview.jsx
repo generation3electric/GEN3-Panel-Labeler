@@ -4,6 +4,8 @@ import PhotoGallery from './PhotoGallery.jsx';
 import ReviewChecklist from './ReviewChecklist.jsx';
 import useReviewProgress from './useReviewProgress.js';
 import { verifyCircuit } from './reviewProgress.js';
+import NumberingOriginSelect from './NumberingOriginSelect.jsx';
+import { normalizeNumberingOrigin, numberingLayout, panelDisplayPairs, breakerPlacement, adjacentCircuit } from './panelLayout.js';
 import { buildRowsFromAnalysis, getAIAnalysis } from './panelAnalysis.js';
 
 const commonCircuits = [
@@ -46,8 +48,10 @@ function descriptionFontSize(text) {
 
 export default function ProcessingReview({ job, panel, photoUrls, savedRecord, onFinalized, onStartOver, returnLabel = 'Start Another Panel' }) {
   const analysis = useMemo(() => getAIAnalysis(savedRecord), [savedRecord]);
-  const normalized = useMemo(() => buildRowsFromAnalysis(panel, analysis), [panel, analysis]);
   const previousFinalization = savedRecord?.finalization || savedRecord?.receipt?.finalization || null;
+  const [numberingOrigin, setNumberingOrigin] = useState(() => normalizeNumberingOrigin(previousFinalization?.panel?.numberingOrigin || panel.numberingOrigin));
+  const layout = numberingLayout(numberingOrigin);
+  const normalized = useMemo(() => buildRowsFromAnalysis({ ...panel, numberingOrigin }, analysis), [panel, analysis, numberingOrigin]);
   const [phase, setPhase] = useState(() => (previousFinalization ? 'final' : analysis ? 'review' : 'ready'));
   const [rows, setRows] = useState(() => previousFinalization?.rows || normalized.rows);
   const [resolutions, setResolutions] = useState(() => previousFinalization?.reviewResolutions || {});
@@ -65,7 +69,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   function openReview(circuit = null) { setReviewTarget({ circuit }); }
   function closeReview() { reviewDialog.current?.close(); }
 
-  const progress = useReviewProgress({ itemId: savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId, recordId: savedRecord?.recordId || savedRecord?.receipt?.recordId, rows, resolutions, setRows, setResolutions, finalizedAt: previousFinalization?.verifiedAt });
+  const progress = useReviewProgress({ itemId: savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId, recordId: savedRecord?.recordId || savedRecord?.receipt?.recordId, rows, resolutions, numberingOrigin, setNumberingOrigin: (origin) => { setNumberingOrigin(origin); if (previousFinalization && origin !== normalizeNumberingOrigin(previousFinalization.panel?.numberingOrigin)) setPhase('review'); }, setRows, setResolutions, finalizedAt: previousFinalization?.verifiedAt });
   const [labelQueries, setLabelQueries] = useState({});
   const [verifierName, setVerifierName] = useState(() => previousFinalization?.verifiedBy || localStorage.getItem('gen3-panel-verifier-name') || '');
   const [finalizing, setFinalizing] = useState(false);
@@ -103,14 +107,14 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           folderUrl: receipt.folderUrl,
           verifiedBy,
           job,
-          panel: { ...panel, manufacturer: panelManufacturer, mainAmps: panelMainAmps },
+          panel: { ...panel, manufacturer: panelManufacturer, mainAmps: panelMainAmps, numberingOrigin },
           rows,
           reviewResolutions: resolutions,
         }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'The final directory could not be saved.');
-      const saved = { ...result, rows };
+      const saved = { ...result, rows, panel: { ...panel, manufacturer: panelManufacturer, mainAmps: panelMainAmps, numberingOrigin } };
       localStorage.setItem('gen3-panel-verifier-name', verifiedBy);
       setFinalReceipt(saved);
       setPhase('final');
@@ -181,7 +185,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   }
 
   function moveBreaker(circuit, direction) {
-    const destinationCircuit = circuit + (direction * 2);
+    const destinationCircuit = adjacentCircuit(circuit, direction, numberingOrigin);
     setRows((current) => {
       const source = current.find((row) => row.circuit === circuit);
       const destination = current.find((row) => row.circuit === destinationCircuit);
@@ -203,19 +207,21 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   }
 
   const byCircuit = Object.fromEntries(rows.map((row) => [row.circuit, row]));
-  const physicalRows = Math.ceil(rows.length / 2);
+  const displayPairs = panelDisplayPairs(rows.length, numberingOrigin);
+  const physicalRows = displayPairs.length;
 
   function renderSide(circuit, side) {
     const row = byCircuit[circuit];
     if (!row || row.continuationOf) return null;
 
     const kind = kindByValue[row.breakerKind] || kindByValue['1p_unknown'];
-    const rowIndex = side === 'left' ? Math.ceil(circuit / 2) : circuit / 2;
-    const rowSpan = kind.poles === 2 ? 2 : 1;
+    const placement = breakerPlacement(circuit, rows.length, numberingOrigin, kind.poles);
+    const rowIndex = placement.row + 1;
+    const rowSpan = placement.span;
     const query = labelQueries[row.circuit] || '';
     const filteredLabels = commonCircuits.filter((name) => name.toLowerCase().includes(query.toLowerCase())).slice(0, 14);
-    const previousRow = byCircuit[circuit - 2];
-    const nextRow = byCircuit[circuit + 2];
+    const previousRow = byCircuit[adjacentCircuit(circuit, -1, numberingOrigin)];
+    const nextRow = byCircuit[adjacentCircuit(circuit, 1, numberingOrigin)];
     const canMoveUp = kind.poles === 1 && previousRow && !previousRow.continuationOf && (kindByValue[previousRow.breakerKind]?.poles || 1) === 1;
     const canMoveDown = kind.poles === 1 && nextRow && !nextRow.continuationOf && (kindByValue[nextRow.breakerKind]?.poles || 1) === 1;
     const isEmpty = row.breakerKind === 'empty';
@@ -283,17 +289,17 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   }
 
   function PhysicalPanel() {
-    const odd = rows.filter((r) => r.circuit % 2 === 1 && !r.continuationOf);
-    const even = rows.filter((r) => r.circuit % 2 === 0 && !r.continuationOf);
+    const left = displayPairs.map((pair) => byCircuit[pair.left]).filter((row) => row && !row.continuationOf);
+    const right = displayPairs.map((pair) => byCircuit[pair.right]).filter((row) => row && !row.continuationOf);
     return (
-      <div className="panelGridScroll"><div className="cleanPanelGrid" style={{ '--panel-rows': physicalRows }}>
-        <div className="panelGridHeader leftDescHead">ODD / LEFT</div>
+      <div className="panelGridScroll"><div className={`cleanPanelGrid ${layout.bottomUp ? 'bottomNumbering' : ''}`} style={{ '--panel-rows': physicalRows }}>
+        <div className="panelGridHeader leftDescHead">{layout.oddLeft ? 'ODD' : 'EVEN'} / LEFT</div>
         <div className="panelGridHeader leftAmpHead">BREAKER</div>
         <div className="panelCenterLine" />
         <div className="panelGridHeader rightAmpHead">BREAKER</div>
-        <div className="panelGridHeader rightDescHead">EVEN / RIGHT</div>
-        {odd.map((row) => renderSide(row.circuit, 'left'))}
-        {even.map((row) => renderSide(row.circuit, 'right'))}
+        <div className="panelGridHeader rightDescHead">{layout.oddLeft ? 'EVEN' : 'ODD'} / RIGHT</div>
+        {left.map((row) => renderSide(row.circuit, 'left'))}
+        {right.map((row) => renderSide(row.circuit, 'right'))}
       </div></div>
     );
   }
@@ -305,11 +311,11 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           <div><span>Generated directory</span><strong>{panel.name}</strong><small>{job.address}</small></div>
           {photoUrls?.breakerField ? <img src={photoUrls.breakerField} alt="Panel" /> : <div className="photoPlaceholder">Panel photo</div>}
         </div>
-        <div className="directoryPreviewMeta"><b>Job #{job.id}</b><b>{panelMainAmps ? `${panelMainAmps}A Main` : 'Main: verify'}</b></div>
+        <div className="directoryPreviewMeta"><b>Job #{job.id}</b><b>#1: {layout.label}</b><b>{panelMainAmps ? `${panelMainAmps}A Main` : 'Main: verify'}</b></div>
         <div className="directoryRows">
-          {Array.from({ length: physicalRows }, (_, i) => {
-            const left = byCircuit[i * 2 + 1];
-            const right = byCircuit[i * 2 + 2];
+          {displayPairs.map((pair, i) => {
+            const left = byCircuit[pair.left];
+            const right = byCircuit[pair.right];
             const leftSource = left?.continuationOf ? byCircuit[left.continuationOf] : left;
             const rightSource = right?.continuationOf ? byCircuit[right.continuationOf] : right;
             const leftEmpty = leftSource?.breakerKind === 'empty';
@@ -318,8 +324,8 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
               <div className="directoryPreviewRow" key={i}>
                 <span>{left ? left.circuit : ''}</span>
                 <div className={`miniBreaker ${leftSource ? `family-${breakerFamily(leftSource)}` : ''}`}>{leftEmpty ? 'Empty' : leftSource?.amps ? `${leftSource.amps}A` : 'Verify'}</div>
-                <div className="miniDescription leftText">{left?.continuationOf ? '↳' : leftEmpty ? 'Open space' : leftSource?.description || 'Unlabeled'}</div>
-                <div className="miniDescription rightText">{right?.continuationOf ? '↳' : rightEmpty ? 'Open space' : rightSource?.description || 'Unlabeled'}</div>
+                <div className="miniDescription leftText">{left?.continuationOf ? `${layout.bottomUp ? '↓' : '↑'} ${left.continuationOf}` : leftEmpty ? 'Open space' : leftSource?.description || 'Unlabeled'}</div>
+                <div className="miniDescription rightText">{right?.continuationOf ? `${layout.bottomUp ? '↓' : '↑'} ${right.continuationOf}` : rightEmpty ? 'Open space' : rightSource?.description || 'Unlabeled'}</div>
                 <div className={`miniBreaker ${rightSource ? `family-${breakerFamily(rightSource)}` : ''}`}>{rightEmpty ? 'Empty' : rightSource?.amps ? `${rightSource.amps}A` : 'Verify'}</div>
                 <span>{right ? right.circuit : ''}</span>
               </div>
@@ -373,6 +379,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
     <main className="content processPage panelReviewPage">
       <div className="panelReviewHeading"><h1>{panel.name || 'Panel review'}</h1><span>{panelManufacturer} · {rows.length} spaces</span></div>
       <div className="panelReviewToolbar">
+        <NumberingOriginSelect value={numberingOrigin} onChange={setNumberingOrigin} />
         <button className="secondary" type="button" onClick={() => openReview(rows.find((row) => row.confidence === 'Review' && !row.continuationOf)?.circuit || rows[0]?.circuit)}>Review circuits ({rows.filter((row) => row.confidence === 'Review' && !row.continuationOf).length})</button>
         <button className="secondary" type="button" onClick={() => openReview()}>Panel warnings ({analysisWarnings.filter((warning) => !resolutions[warning]).length})</button>
         {gallery}

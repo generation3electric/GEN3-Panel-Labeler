@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { normalizeNumberingOrigin, numberingLayout, panelDisplayPairs } from './src/panelLayout.js';
 import { normalizeReviewProgress } from './src/reviewProgress.js';
 
 const BREAKER_KINDS = new Set([
@@ -62,6 +63,7 @@ export function normalizeVerifiedDirectory(input, now = new Date()) {
       manufacturer: cleanText(input?.panel?.manufacturer || 'Unknown', 120),
       mainAmps: positiveInteger(input?.panel?.mainAmps),
       spaces: rows.length,
+      numberingOrigin: normalizeNumberingOrigin(input?.panel?.numberingOrigin),
     },
     circuits: rows,
     reviewResolutions: normalizeReviewProgress({ rows: input.rows, resolutions: input.reviewResolutions || {} }, recordId).resolutions,
@@ -122,8 +124,11 @@ export function createFinalDirectoryPdf(directory) {
     doc.text(`${directory.panel.manufacturer || 'Unknown'} · ${directory.panel.mainAmps ? `${directory.panel.mainAmps}A Main` : 'Main amps not recorded'}`, x + 480, 78, { width: 264, align: 'right' });
     doc.fillColor(muted).font('Helvetica').fontSize(7.5).text(`Verified by ${directory.verifiedBy} · ${new Date(directory.verifiedAt).toLocaleString('en-US')}`, x + 350, 92, { width: 394, align: 'right' });
 
-    const tableY = 111;
-    const physicalRows = Math.ceil(directory.circuits.length / 2);
+    const layout = numberingLayout(directory.panel.numberingOrigin);
+    const displayPairs = panelDisplayPairs(directory.circuits.length, layout.origin);
+    doc.fillColor(muted).font('Helvetica').fontSize(7).text(`Circuit #1: ${layout.label}`, x, 102, { width: 250 });
+    const tableY = 115;
+    const physicalRows = displayPairs.length;
     const tableBottom = 568;
     const headerHeight = 18;
     const rowHeight = Math.min(22, (tableBottom - tableY - headerHeight) / Math.max(1, physicalRows));
@@ -132,7 +137,7 @@ export function createFinalDirectoryPdf(directory) {
     for (let i = 0; i < columns.length - 1; i += 1) starts.push(starts[i] + columns[i]);
 
     doc.rect(x, tableY, pageWidth, headerHeight).fill(blue);
-    const headers = ['CKT', 'BREAKER', 'LEFT / ODD CIRCUIT', 'RIGHT / EVEN CIRCUIT', 'BREAKER', 'CKT'];
+    const headers = ['CKT', 'BREAKER', `LEFT / ${layout.oddLeft ? 'ODD' : 'EVEN'} CIRCUIT`, `RIGHT / ${layout.oddLeft ? 'EVEN' : 'ODD'} CIRCUIT`, 'BREAKER', 'CKT'];
     headers.forEach((header, i) => {
       doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7).text(header, starts[i] + 3, tableY + 6, { width: columns[i] - 6, align: i === 2 ? 'left' : i === 3 ? 'right' : 'center' });
     });
@@ -140,13 +145,13 @@ export function createFinalDirectoryPdf(directory) {
     const byCircuit = Object.fromEntries(directory.circuits.map((row) => [row.circuit, row]));
     for (let index = 0; index < physicalRows; index += 1) {
       const y = tableY + headerHeight + index * rowHeight;
-      const odd = byCircuit[index * 2 + 1];
-      const even = byCircuit[index * 2 + 2];
+      const left = byCircuit[displayPairs[index].left];
+      const right = byCircuit[displayPairs[index].right];
       if (index % 2 === 1) doc.rect(x, y, pageWidth, rowHeight).fill('#f4f7f9');
       doc.strokeColor(line).lineWidth(0.5).moveTo(x, y + rowHeight).lineTo(x + pageWidth, y + rowHeight).stroke();
       const fontSize = rowHeight < 13 ? 6 : rowHeight < 17 ? 7 : 8;
       const baseline = y + Math.max(2, (rowHeight - fontSize) / 2 - 1);
-      const values = [odd?.circuit || '', breakerLabel(odd), description(odd, byCircuit), description(even, byCircuit), breakerLabel(even), even?.circuit || ''];
+      const values = [left?.circuit || '', breakerLabel(left), description(left, byCircuit), description(right, byCircuit), breakerLabel(right), right?.circuit || ''];
       values.forEach((value, i) => {
         const align = i === 2 ? 'left' : i === 3 ? 'right' : 'center';
         const weight = i === 0 || i === 5 ? 'Helvetica-Bold' : 'Helvetica';
