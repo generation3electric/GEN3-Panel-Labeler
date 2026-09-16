@@ -11,7 +11,7 @@ function GalleryImage({ photo }) {
     <img src={photo.url} alt={photo.label} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES, itemId, folderUrl, openPhoto }) {
+export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES, itemId, folderUrl, openPhoto, compact = false }) {
   const [remotePhotos, setRemotePhotos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -19,6 +19,7 @@ export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES
   const [selected, setSelected] = useState(0);
   const [zoomed, setZoomed] = useState(false);
   const dialog = useRef(null);
+  const galleryDialog = useRef(null);
   const openedRequest = useRef(null);
   const [photoNotice, setPhotoNotice] = useState('');
   const local = useMemo(() => localPhotos.filter((photo) => photo.file instanceof Blob).map((photo) => ({
@@ -58,7 +59,7 @@ export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES
   const current = photos[selected];
   function move(delta) { setSelected((index) => Math.max(0, Math.min(photos.length - 1, index + delta))); setZoomed(false); }
 
-  return <section className="panelPhotoGallery noPrint" aria-label="Panel photos">
+  const galleryContents = <>
     <div className="galleryHeading"><h2>All Photos{photos.length ? ` (${photos.length})` : ''}</h2><span>Tap a photo to enlarge</span></div>
     {photoNotice && <p role="alert">{photoNotice}</p>}
     {loading && <p role="status">Loading panel photos…</p>}
@@ -68,6 +69,10 @@ export default function PhotoGallery({ photoUrls = EMPTY, localPhotos = NO_FILES
       <GalleryImage key={photo.url} photo={photo} /><span>{photo.label}</span>
     </button>)}</div>
     {folderUrl && <a className="gallerySource" href={folderUrl} target="_blank" rel="noreferrer">Open photo folder in SharePoint</a>}
+  </>;
+
+  return <section className={compact ? "compactPhotoGallery noPrint" : "panelPhotoGallery noPrint"} aria-label="Panel photos">
+    {compact ? <><button type="button" className="secondary" onClick={() => galleryDialog.current.showModal()}>Photos{photos.length ? ` (${photos.length})` : ''}</button><dialog className="galleryListDialog" ref={galleryDialog} aria-label="All panel photos"><header className="reviewPopupHeader"><h2>Panel photos</h2><button type="button" className="secondary" autoFocus onClick={() => galleryDialog.current.close()}>Close</button></header><div className="reviewPopupBody">{galleryContents}</div></dialog></> : galleryContents}
     <dialog className="galleryDialog" ref={dialog} aria-label="Enlarged panel photo" onKeyDown={(event) => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); move(event.key === 'ArrowLeft' ? -1 : 1); }
     }}>
