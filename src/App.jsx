@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
 import UploadActivity from './UploadActivity.jsx';
+import PhotoGallery from './PhotoGallery.jsx';
 import { PhotoTile, UnavailablePhoto, usePhotoChecks } from './PhotoCapture.jsx';
 import { MAX_PHOTOS, PHOTO_RULES_VERSION, photoGuidance, qualityResolved, unavailableReason } from './photoRules.js';
 import { getAllLocalPanels, getPendingPanels, markPanelFinalized, markPanelUploaded, panelToFormData, savePendingPanel } from './offlineQueue.js';
@@ -78,6 +79,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [localNotice, setLocalNotice] = useState('');
   const [activityOpen, setActivityOpen] = useState(false);
+  const [reviewingUploaded, setReviewingUploaded] = useState(false);
   const syncInFlight = useRef(false);
 
   const filteredJobs = jobs.filter((j) => `${j.id} ${j.customer} ${j.address} ${j.summary || ''}`.toLowerCase().includes(query.toLowerCase()));
@@ -177,6 +179,7 @@ export default function App() {
   }, [step, jobDate]);
 
   function reset() {
+    setReviewingUploaded(false);
     clearPhotoDetails();
     setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial' });
     setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setSending(false); setSendError(''); setSavedRecord(null); setProcessing(false); setActivityOpen(false); setLocalNotice('');
@@ -226,6 +229,7 @@ export default function App() {
       }
       try {
         const result = await uploadQueuedItem(queued);
+        setReviewingUploaded(false);
         setSavedRecord(result);
         await refreshLocalPanels();
         setProcessing(true);
@@ -246,6 +250,7 @@ export default function App() {
   }
 
   function reviewUploadedPanel(item) {
+    setReviewingUploaded(true);
     setJob(item.record?.job || null);
     setPanel(item.record?.panel || { name: 'Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '' });
     setSavedRecord(item.receipt || item);
@@ -270,7 +275,7 @@ export default function App() {
     return (
       <div className="appShell">
         <Header step={4} onHome={reset} onUploads={() => { setProcessing(false); setActivityOpen(true); refreshLocalPanels(); }} online={online} pendingCount={pendingCount} syncing={syncing} />
-        <ProcessingReview job={job} panel={panel} photoUrls={processingPhotoUrls} savedRecord={savedRecord} onFinalized={rememberFinalization} onStartOver={reset} />
+        <ProcessingReview job={job} panel={panel} photoUrls={reviewingUploaded ? undefined : processingPhotoUrls} savedRecord={savedRecord} onFinalized={rememberFinalization} onStartOver={reset} />
       </div>
     );
   }
@@ -358,6 +363,7 @@ export default function App() {
           <section>
             <p className="eyebrow">4 · Save & process</p><h1>{online ? 'Ready to upload.' : 'Ready to save offline.'}</h1>
             <div className="completionCard"><div className="completionNumber">{capturedCount}</div><div><strong>Photos captured</strong><span>Overview: yes · Left: {leftPhotos.length} · Right: {rightPhotos.length} · Manufacturer: {manufacturerPhoto ? 'photo' : unavailableReason(unavailable.manufacturer)} · Directory: {directory ? 'photo' : unavailableReason(unavailable.directory)}</span></div></div>
+            <PhotoGallery photoUrls={processingPhotoUrls} />
             <div className="tips"><strong>Photo review saved with this record</strong><span>Coverage confirmed · {qualityExceptions} photo{qualityExceptions === 1 ? '' : 's'} flagged for review. Label-unavailable reasons and quality results will be saved with the photos.</span></div>
             <div className="infoStrip"><strong>{online ? 'Online:' : 'Offline:'}</strong> {online ? 'The app saves locally first, uploads to SharePoint, then clears the local photo blobs only after the server confirms success.' : 'The full panel record and photos will remain on this phone and automatically upload when service returns.'}</div>
             <div className="bottomActions"><button className="secondary" onClick={() => setStep(3)}>Back</button><button className="primary sendButton" disabled={!complete || sending} onClick={saveAndSend}>{sending ? 'Saving…' : online ? 'Save, Upload & Build Label' : 'Save Offline'}</button></div>

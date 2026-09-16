@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
 import './PastRecords.css';
+import PhotoGallery from './PhotoGallery.jsx';
 
 function formatDate(value) {
   if (!value) return 'Unknown date';
@@ -16,6 +17,7 @@ export default function PastRecords() {
   const [error, setError] = useState('');
   const [openingId, setOpeningId] = useState('');
   const [selected, setSelected] = useState(null);
+  const [photosRecord, setPhotosRecord] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -72,7 +74,7 @@ export default function PastRecords() {
           key={`${selected.id}-${selected.finalization?.verifiedAt || 'ai'}`}
           job={job}
           panel={panel}
-          photoUrls={selected.overviewPhotoUrl ? { breakerField: selected.overviewPhotoUrl } : {}}
+
           savedRecord={{ ...selected, listItemId: selected.id }}
           onStartOver={() => setSelected(null)}
           returnLabel="Back to Past Jobs"
@@ -80,6 +82,13 @@ export default function PastRecords() {
       </div>
     );
   }
+
+  if (photosRecord) return <div className="historyShell">
+    <header className="historyReviewHeader"><button type="button" onClick={() => setPhotosRecord(null)}>← Past Jobs</button><span>Job #{photosRecord.jobNumber} · {photosRecord.panelName}</span></header>
+    <main className="historyContent"><h1>Panel Photos</h1><p>{photosRecord.address}</p>
+      <PhotoGallery key={photosRecord.id} itemId={photosRecord.id} folderUrl={photosRecord.folderUrl} />
+    </main>
+  </div>;
 
   return (
     <div className="historyShell">
@@ -116,7 +125,7 @@ export default function PastRecords() {
                   {openingId === record.id ? 'Opening…' : /verified/i.test(record.status || '') ? 'Open Final Directory' : 'Continue Verification'}
                 </button>
                 {(record.finalPdfUrl || /verified/i.test(record.status || '')) && <a className="secondary historyOpen" href={`/api/sharepoint/panel-records/${encodeURIComponent(record.id)}/final-directory`}>Download PDF</a>}
-                {record.folderUrl ? <a className="secondary historyOpen" href={record.folderUrl} target="_blank" rel="noreferrer">Open Photos</a> : <button className="secondary" disabled>No folder link</button>}
+                <button className="secondary historyOpen" type="button" onClick={() => { setPhotosRecord(record); window.scrollTo({ top: 0 }); }}>View All Photos</button>
               </div>
             </article>
           ))}

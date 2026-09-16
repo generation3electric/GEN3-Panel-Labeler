@@ -1,6 +1,7 @@
 import express from 'express';
 import { validatePhotoRecord } from './src/photoRules.js';
 import multer from 'multer';
+import { isPanelPhoto, panelPhotoList } from './src/photoGallery.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzePanelPhotos, openAIConfigured } from './aiPanel.js';
@@ -360,6 +361,32 @@ app.get('/api/sharepoint/panel-records/:itemId', async (req, res) => {
   } catch (error) {
     console.error('SharePoint panel detail failed:', { message: error.message, status: error.status });
     res.status(error.status || 500).json({ error: error.message || 'The saved panel record could not be opened.' });
+  }
+});
+
+app.get('/api/sharepoint/panel-records/:itemId/photos', async (req, res) => {
+  if (!microsoftConfigured()) return res.status(503).json({ error: 'The Microsoft connection has not been configured on Railway yet.' });
+  try {
+    const token = await getAccessToken();
+    const context = await loadPanelContext(token, req.params.itemId);
+    res.set('Cache-Control', 'private, no-store').json({ photos: panelPhotoList(context.files, req.params.itemId) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Panel photos could not be loaded.' });
+  }
+});
+
+app.get('/api/sharepoint/panel-records/:itemId/photos/:photoId', async (req, res) => {
+  if (!microsoftConfigured()) return res.status(503).json({ error: 'The Microsoft connection has not been configured on Railway yet.' });
+  try {
+    const token = await getAccessToken();
+    const context = await loadPanelContext(token, req.params.itemId);
+    const photo = context.files.find((file) => file.id === req.params.photoId && isPanelPhoto(file));
+    if (!photo) return res.status(404).json({ error: 'This photo was not found in the selected panel.' });
+    const buffer = await graphBuffer(token, `/drives/${context.drive.id}/items/${photo.id}/content`);
+    const contentType = /^image\/(jpeg|png|webp|gif|heic|heif|avif|bmp|tiff)$/i.test(photo.file.mimeType || '') ? photo.file.mimeType : 'application/octet-stream';
+    res.set('Content-Type', contentType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'private, no-store').send(buffer);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'The panel photo could not be opened.' });
   }
 });
 

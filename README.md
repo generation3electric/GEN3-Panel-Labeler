@@ -12,6 +12,8 @@ Mobile-first field workflow for collecting the information and photos needed to 
 - Offline image screening for possible blur, glare, darkness, low contrast, and low resolution; enlarge photos to verify readability
 - Best-available photo exceptions require a reason and remain visible in AI review; checks and reasons are saved in the panel record
 - Camera/file capture on mobile
+- All Photos gallery in capture review, AI verification, final directories, Past Jobs, and Pending / Recently Uploaded; enlarge, zoom, and step through photos without leaving the app
+- Pending photos can be viewed offline on the capturing device; uploaded photos load from SharePoint when online
 - Retake photos
 - Completion checklist prevents submission with missing required photos
 - One-button SharePoint submission

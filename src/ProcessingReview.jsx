@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import './ProcessingReview.css';
+import PhotoGallery from './PhotoGallery.jsx';
 import { buildRowsFromAnalysis, getAIAnalysis } from './panelAnalysis.js';
 
 const commonCircuits = [
@@ -55,6 +56,8 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
   const analyzedPanel = analysis?.panel || {};
   const panelManufacturer = panel.manufacturer && panel.manufacturer !== 'Unknown' ? panel.manufacturer : analyzedPanel.manufacturer || 'Verify';
   const panelMainAmps = panel.mainAmps || analyzedPanel.mainAmps || null;
+
+  const gallery = <PhotoGallery key={savedRecord?.recordId || 'current'} photoUrls={photoUrls} itemId={savedRecord?.listItemId || savedRecord?.id || savedRecord?.receipt?.listItemId} folderUrl={savedRecord?.folderUrl} />;
 
   function runPreview() {
     setPhase('review');
@@ -313,6 +316,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
         <p className="eyebrow">Panel processing</p>
         <h1>AI results are not available for this panel.</h1>
         <p className="lead">The server did not return an analysis result. You can still open a blank verification screen, but every circuit will be marked for review.</p>
+        {gallery}
         <button className="primary large" onClick={runPreview}>Open Blank Verification</button>
         {savedRecord?.folderUrl && <a className="sharePointLink" href={savedRecord.folderUrl} target="_blank" rel="noreferrer">Open source photos in SharePoint</a>}
       </main>
@@ -334,6 +338,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
           <div className="directoryFooter">Verified by {finalReceipt?.verifiedBy || verifierName} · GEN3 Electric & HVAC · {finalReceipt?.verifiedAt ? new Date(finalReceipt.verifiedAt).toLocaleDateString() : new Date().toLocaleDateString()}</div>
         </section>
         {finalReceipt && <div className="finalSaved noPrint"><strong>Saved to SharePoint</strong><span>The corrected directory, verification details, and final PDF are now part of this panel’s permanent record.</span>{finalReceipt.indexWarnings?.length > 0 && <small>Files were saved. Some optional SharePoint index columns are not set up yet.</small>}</div>}
+        {gallery}
         <div className="finalActions noPrint"><button className="secondary" onClick={() => setPhase('review')}>Back to Review</button>{finalReceipt?.finalPdfUrl ? <a className="primary" href={finalReceipt.finalPdfUrl} target="_blank" rel="noreferrer">Open Saved PDF</a> : <button className="primary" onClick={() => window.print()}>Print Copy</button>}</div>
         <button className="secondary noPrint printCopyButton" onClick={() => window.print()}>Print Another Copy</button>
         <div className="nextProcessCard noPrint"><span>Next process</span><strong>Panel Load Calculation</strong><p>Use the verified breakers, appliance circuits and service size as the starting point for the load-calculation workflow.</p></div>
@@ -353,6 +358,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
       </div>
       <div className="reviewNotice"><strong>{reviewCount} items need a closer look.</strong><span>Yellow items are low-confidence, incomplete, or missing from the AI reading. Correct them before generating the directory.</span></div>
       {analysisWarnings.length > 0 && <div className="analysisWarnings"><strong>AI warnings</strong><ul>{analysisWarnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></div>}
+      {gallery}
       <div className="panelLegend"><span><i className="legendStandard" />Standard</span><span><i className="legendAfci" />AFCI</span><span><i className="legendGfci" />GFCI / Dual</span><span><i className="legendSurge" />Surge</span><span><i className="legendReview" />Needs review</span></div>
       {PhysicalPanel()}
       <div className="previewSectionTitle"><span>Live preview</span><strong>Finished directory</strong></div>
