@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { normalizeNumberingOrigin } from './panelLayout.js';
 
-export default function useReviewProgress({ itemId, recordId, rows, resolutions, setRows, setResolutions, finalizedAt }) {
+export default function useReviewProgress({ itemId, recordId, rows, resolutions, numberingOrigin, setNumberingOrigin, setRows, setResolutions, finalizedAt }) {
   const [ready, setReady] = useState(!itemId);
   const [status, setStatus] = useState('Loading saved review…');
   const [retry, setRetry] = useState(0);
@@ -31,7 +32,8 @@ export default function useReviewProgress({ itemId, recordId, rows, resolutions,
       const draft = local && (!remote || Date.parse(local.updatedAt) > Date.parse(remote.updatedAt)) ? local : remote;
       if (draft?.recordId === recordId && Array.isArray(draft.rows) && (!finalizedAt || Date.parse(draft.updatedAt) > Date.parse(finalizedAt))) {
         setRows(draft.rows); setResolutions(draft.resolutions || {});
-        lastSaved.current = draft === remote ? JSON.stringify({ rows: draft.rows, resolutions: draft.resolutions || {} }) : '';
+        if (draft.numberingOrigin) setNumberingOrigin(normalizeNumberingOrigin(draft.numberingOrigin));
+        lastSaved.current = draft === remote ? JSON.stringify({ rows: draft.rows, resolutions: draft.resolutions || {}, numberingOrigin: normalizeNumberingOrigin(draft.numberingOrigin || numberingOrigin) }) : '';
       } else if (finalizedAt && draft?.resolutions) setResolutions(draft.resolutions);
       setStatus(failed ? 'Could not load shared progress. Changes will stay on this device until saved.' : 'Review loaded');
       setReady(true);
@@ -43,9 +45,9 @@ export default function useReviewProgress({ itemId, recordId, rows, resolutions,
 
   useEffect(() => {
     if (!ready || !key) return;
-    const snapshot = JSON.stringify({ rows, resolutions });
+    const snapshot = JSON.stringify({ rows, resolutions, numberingOrigin });
     if (snapshot === lastSaved.current && !retry) return;
-    const progress = { recordId, rows, resolutions, updatedAt: new Date().toISOString() };
+    const progress = { recordId, rows, resolutions, numberingOrigin, updatedAt: new Date().toISOString() };
     let stored = false;
     try { localStorage.setItem(key, JSON.stringify(progress)); stored = true; } catch { /* show actual save status below */ }
     setStatus(stored ? 'Saved on this device · saving to SharePoint…' : 'Saving to SharePoint…');
@@ -64,6 +66,6 @@ export default function useReviewProgress({ itemId, recordId, rows, resolutions,
       });
     }, 900);
     return () => { active = false; clearTimeout(timer); };
-  }, [ready, rows, resolutions, url, key, retry]);
+  }, [ready, rows, resolutions, numberingOrigin, url, key, retry]);
   return { ready, status, retry: () => { if (!remoteLoaded.current) setReload((value) => value + 1); else setRetry((value) => value + 1); } };
 }

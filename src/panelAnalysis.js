@@ -1,3 +1,5 @@
+import { circuitSide } from './panelLayout.js';
+
 const KNOWN_BREAKER_TYPES = new Set(['standard', 'afci', 'gfci', 'dual', 'surge']);
 
 function positiveInteger(value) {
@@ -80,7 +82,7 @@ export function buildRowsFromAnalysis(panel, analysis) {
 
     const poles = positiveInteger(circuit?.poles) === 2 ? 2 : 1;
     const score = Number(circuit?.confidence);
-    const expectedSide = position % 2 === 1 ? 'left' : 'right';
+    const expectedSide = circuitSide(position, panel?.numberingOrigin);
     if (circuit?.side && circuit.side !== expectedSide) {
       warnings.push(`Circuit ${position} was identified on the ${circuit.side} side; verify its physical position.`);
     }

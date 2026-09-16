@@ -1,3 +1,5 @@
+import { normalizeNumberingOrigin } from './panelLayout.js';
+
 export function circuitReady(row) {
   return row?.breakerKind === 'empty' || Boolean(row && Number.isInteger(Number(row.amps)) && Number(row.amps) > 0 &&
     /^(1|2)p_(standard|afci|gfci|dual|surge)$/.test(row.breakerKind) && String(row.description || '').trim());
@@ -36,5 +38,5 @@ export function normalizeReviewProgress(input, recordId) {
     if (warning.length > 8000 || !value || typeof value.note !== 'string' || !value.note.trim()) continue;
     Object.defineProperty(resolutions, warning, { value: { note: value.note.trim().slice(0,1000), resolvedAt: String(value.resolvedAt || '').slice(0,40) }, enumerable: true });
   }
-  return { schemaVersion: 1, recordId, rows, resolutions, updatedAt: new Date().toISOString() };
+  return { schemaVersion: 1, recordId, rows, resolutions, numberingOrigin: normalizeNumberingOrigin(input.numberingOrigin), updatedAt: new Date().toISOString() };
 }

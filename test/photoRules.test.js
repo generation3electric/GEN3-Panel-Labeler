@@ -83,10 +83,14 @@ test('AI receives labeled photos and field exceptions remain in analysis warning
   };
   try {
     const record = validRecord();
+    record.panel = { ...record.panel, numberingOrigin: 'bottom-right' };
     record.photoSteps[1].quality = { status: 'checked', issues: ['blur'], accepted: true, reason: 'Faded print' };
     const result = await analyzePanelPhotos({ record, files: [{ originalname: 'left-1.jpg', mimetype: 'image/jpeg', buffer: Buffer.from('image') }] });
     const content = request.input[0].content;
     assert.match(content[0].text, /Faded print/);
+    assert.match(content[0].text, /circuit #1 at the bottom right/);
+    assert.match(content[0].text, /Numbers increase upward from the bottom/);
+    assert.match(content[0].text, /Odd circuits are on the right/);
     assert.equal(content[1].text, 'Photo: left-1.jpg');
     assert.equal(content[2].type, 'input_image');
     assert.match(result.analysis.warnings.join(' '), /Faded print/);
