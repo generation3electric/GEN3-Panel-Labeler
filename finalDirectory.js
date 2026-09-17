@@ -54,7 +54,7 @@ export function normalizeVerifiedDirectory(input, now = new Date()) {
     verifiedAt: now.toISOString(),
     job: {
       id: cleanText(input?.job?.id, 80),
-      serviceTitanId: cleanText(input?.job?.serviceTitanId || input?.job?.id, 80),
+      serviceTitanId: cleanText(input?.job?.serviceTitanId, 80),
       customer: cleanText(input?.job?.customer, 160),
       address: cleanText(input?.job?.address, 240),
     },

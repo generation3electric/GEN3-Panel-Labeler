@@ -157,3 +157,37 @@ creation, history and photo access. DOM flow checks exercised capture through
 technician review, marker placement, failed-save recovery and report access with
 mocked services. The generated PDF was rendered for layout review. Live AI and
 SharePoint end-to-end testing requires an authenticated field trial.
+
+## ServiceTitan report links in job notes
+
+Saving a **Panel Inspection**, **Recall Check**, or **final verified directory**
+now attempts to add a job note after the report files have saved successfully.
+The note includes the panel, job number, reviewing technician, original completion
+time (Philadelphia), a report link, and a link to saved photos/files. Inspection
+and directory links open the saved SharePoint PDF; recall links open the saved
+check in the employee app. Existing Microsoft/SharePoint permissions still apply.
+
+The ServiceTitan integration requires **Jobs read and write** scopes
+(`tn.jpm.jobs:r`, `tn.jpm.jobs:w`). The endpoint is
+`POST /jpm/v2/tenant/{tenant}/jobs/{id}/notes`; see the
+[official Create Job Note API](https://developer.servicetitan.io/docs/apis/tenant-jpm-v2/endpoints/Jobs_CreateNote).
+Existing connection variables and `AUTH_PUBLIC_URL` are reused.
+
+Only a real `job.serviceTitanId` is used. Standalone and historical-location
+records are saved without a note. The app never substitutes a displayed job number
+or location ID. Initial directory photo uploads wait for final verification.
+
+Each saved report shows **ServiceTitan job note** delivery status and an explicit
+retry action. Older reports can be opened from history and linked with **Add report
+link to job notes**. Failed note delivery does not fail or erase the saved report.
+Receipts live separately under `ServiceTitan Job Notes` in the existing SharePoint
+library. Retries scan all job-note pages for a stable report marker before posting;
+concurrent requests are serialized locally and with an atomic SharePoint folder lock.
+Expired locks from interrupted deployments can be reclaimed after ten minutes.
+
+A timeout or server error after posting can mean the note was accepted. Those
+receipts stay **uncertain** and **Check delivery** only searches for the existing
+note; it does not blindly resend. If a note never appears, the office must confirm
+the outcome before an administrator resets that receipt. There is no background
+retry worker. Repeated finalization uses the same permanent PDF link and does not
+add another note for that same panel record.

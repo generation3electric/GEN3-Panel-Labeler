@@ -34,7 +34,7 @@ function employee(req) {
 function parseRecord(req) { try { return JSON.parse(req.body.record); } catch { fail('The recall check form is invalid.'); } }
 const bounded = (value, n = 500) => typeof value === 'string' ? value.trim().slice(0, n) : '';
 export function registerRecallRoutes(app, storage) {
-  const { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile } = storage;
+  const { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile, jobNotes } = storage;
   const route = (fn) => async (req, res) => { res.set('Cache-Control', 'private, no-store'); try { await fn(req, res); } catch (error) { console.warn('Recall check:', error.message); res.status(error.status || 500).json({ error: error.status ? error.message : 'The recall check could not be completed. Your photos have not been cleared; retry in a moment.' }); } };
   const multipart = (req, res, next) => upload(req, res, (error) => error ? res.status(400).json({ error: 'Use up to six JPEG, PNG, or WebP photos, each under 12 MB.' }) : next());
   async function context() { const token = await getAccessToken(); const { drive } = await getSiteListAndDrive(token); return { token, drive }; }
@@ -66,7 +66,7 @@ export function registerRecallRoutes(app, storage) {
     try {
       const existing = await read(ctx, input.id);
       if (existing.fingerprint !== fingerprint) fail('This check was already saved with different details. Open it in Recall Check History or start a new check.', 409);
-      return res.json(existing);
+      return res.json({ ...existing, jobNote: await jobNotes?.publish('recall', existing) });
     } catch (error) { if (error.status !== 404) throw error; }
     const root = await ensureFolder(ctx.token, ctx.drive.id, null, 'Recall Checks');
     const folder = await ensureFolder(ctx.token, ctx.drive.id, root.id, input.id);
@@ -81,7 +81,7 @@ export function registerRecallRoutes(app, storage) {
       snapshot, ...decision, checkedBy: user, savedAt: new Date().toISOString(), folderUrl: folder.webUrl, photos };
     // Manifest is written last. A partial photo upload is never a saved check.
     await uploadFile(ctx.token, ctx.drive.id, folder.id, 'record.json', Buffer.from(JSON.stringify(record, null, 2)));
-    res.status(201).json(record);
+    res.status(201).json({ ...record, jobNote: await jobNotes?.publish('recall', record) });
   }));
   app.get('/api/recall-checks', route(async (req, res) => {
     const ctx = await context();
@@ -113,6 +113,10 @@ export function registerRecallRoutes(app, storage) {
     res.json({ records, next, incomplete });
   }));
   app.get('/api/recall-checks/:id', route(async (req, res) => res.json(await read(await context(), req.params.id))));
+  for (const method of ['get', 'post']) app[method]('/api/recall-checks/:id/job-note', route(async (req, res) => {
+    const record = await read(await context(), req.params.id);
+    res.json(await jobNotes[method === 'post' ? 'publish' : 'get']('recall', record));
+  }));
   app.get('/api/recall-checks/:id/photos/:name', route(async (req, res) => {
     if (!/^photo-(overview|label|detail)-[0-5]\.(jpg|png|webp)$/.test(req.params.name)) fail('Invalid recall photo.');
     const ctx = await context();
