@@ -306,6 +306,7 @@ export default function App() {
               <button type="button" className="secondary" onClick={() => { setActivityOpen(true); refreshLocalPanels(); }}>Pending / Recently Uploaded{pendingCount ? ` (${pendingCount})` : ''}</button>
               <a className="secondary" href="/past-records">Past Jobs</a>
             </div>
+            <div className="recallHomeCard"><h2>Panel Inspection <small>First version</small></h2><p>Capture panel photos, review age evidence and visible concerns, and save a technician-reviewed report.</p><a className="primary" href="/panel-inspection">Start Panel Inspection</a><a className="secondary" href="/panel-inspection/history">Inspection History</a></div>
             <div className="recallHomeCard"><h2>Panel Recall Check</h2><p>Check a panel against official recall notices using its photos and label details.</p><a className="primary" href="/recall-check">Start Recall Check</a><a className="secondary" href="/recall-check/history">Recall Check History</a></div>
             {pendingCount > 0 && <div className="infoStrip"><strong>{pendingCount} panel{pendingCount === 1 ? '' : 's'} waiting to upload.</strong> {online ? 'Sync will retry automatically.' : 'They are stored on this device until service returns.'}</div>}
           </section>

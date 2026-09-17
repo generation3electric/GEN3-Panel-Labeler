@@ -110,3 +110,50 @@ Validation: `npm test` covers partial-feed failures, missing identifiers, offici
 source validation, technician confirmation requirements, evidence tampering,
 image validation, separate save/read behavior, idempotent retries, and interrupted
 uploads. `npm run build` creates the production client.
+
+## Panel Inspection — first field-trial version
+
+`/panel-inspection` is a separate workflow with its own draft and saved history at
+`/panel-inspection/history`. The quick Recall Check and panel directory tools remain
+available. Link a ServiceTitan job or start a standalone inspection, capture an
+overall view, interior, manufacturer label, surroundings, and optional close-ups.
+Unavailable views require a reason; the overall view is required. The browser
+prepares JPEG copies (up to 3000 pixels) without cropping and retains them in an
+IndexedDB draft. Up to ten images may be used.
+
+AI suggests visible observations with numbered photo markers. A technician can
+correct, confirm, dismiss with a reason, add findings, or move markers on the
+original photo. Manual review works without AI. Signed AI evidence binds the
+suggestions to the exact uploaded photos; original suggestions remain in the
+saved audit record. AI never establishes electrical safety or code compliance.
+
+Manufacturing evidence is separate from installation evidence. Automatic decoding
+initially supports verified modern Square D QO/Homeline enclosure or interior
+six-digit YYWWDS codes, per Schneider FAQ FA274608. Breaker/cover dates, unsupported
+formats and future/invalid codes stay unknown. Other panels support documented
+manufacturing year ranges with technician-supplied evidence. Appearance alone does
+not establish age, remaining life, or replacement need.
+
+The condition summary follows confirmed findings: urgent, repairs recommended,
+attention needed, or no visible concerns identified. Unreviewed findings, missing
+views, scope gaps, unanswered symptom questions, and unresolved photo limitations
+keep completeness separate and visible. Serious findings are not averaged away.
+Incomplete inspections can be saved for follow-up but cannot earn the clear
+summary. Recall status remains separate, uses the existing signed CPSC lookup,
+and must be refreshed after identifier changes or after 24 hours.
+
+The existing employee gateway identifies the reviewer. The existing SharePoint
+library holds `Panel Inspections/<inspection-id>/` with prepared photos, a
+customer PDF, and an immutable JSON record written last. Save retries are
+idempotent; a conflicting saved ID is rejected. Office review is a history filter,
+not an automatic message or assignment. History searches the records loaded so
+far and offers pagination. No new environment variables or credentials are needed.
+Shared saves, AI review, and recalls require internet. A local draft can be edited
+offline once the app is loaded; device storage is not a substitute for a shared save.
+
+Validation: `npm test` covers age evidence, condition and completeness rules,
+review requirements, photo/analysis binding, failed uploads, idempotency, PDF
+creation, history and photo access. DOM flow checks exercised capture through
+technician review, marker placement, failed-save recovery and report access with
+mocked services. The generated PDF was rendered for layout review. Live AI and
+SharePoint end-to-end testing requires an authenticated field trial.

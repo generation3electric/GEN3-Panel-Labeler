@@ -1,4 +1,4 @@
-const CACHE = 'gen3-panel-labeler-v2';
+const CACHE = 'gen3-panel-labeler-v3';
 const APP_SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -14,6 +14,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // API documents (including PDF navigations) must never replace the app shell.
+  if (url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).then((response) => {
