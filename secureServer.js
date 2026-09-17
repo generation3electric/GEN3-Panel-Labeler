@@ -173,7 +173,9 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res) => {
-  const headers = { ...req.headers, host: `127.0.0.1:${APP_PORT}` };
+  const signedInUser = session(req);
+  const headers = { ...req.headers, host: `127.0.0.1:${APP_PORT}`,
+    'x-gen3-employee': Buffer.from(JSON.stringify({ id: signedInUser.oid, name: signedInUser.name, email: signedInUser.email })).toString('base64url') };
   const proxy = http.request({ hostname: '127.0.0.1', port: APP_PORT, path: req.originalUrl, method: req.method, headers }, (upstream) => {
     res.status(upstream.statusCode || 502);
     for (const [name, value] of Object.entries(upstream.headers)) {

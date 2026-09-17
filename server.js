@@ -1,4 +1,5 @@
 import express from 'express';
+import { registerRecallRoutes } from './recallRoutes.js';
 import { validatePhotoRecord } from './src/photoRules.js';
 import multer from 'multer';
 import { normalizeReviewProgress } from './src/reviewProgress.js';
@@ -557,6 +558,8 @@ app.post('/api/sharepoint/panel-records/finalize', express.json({ limit: '1mb' }
     res.status(error.status || 500).json({ error: error.message || 'The verified panel directory could not be saved.', code: error.code || null });
   }
 });
+
+registerRecallRoutes(app, { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile });
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(root, 'dist')));
