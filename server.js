@@ -1,5 +1,6 @@
 import express from 'express';
 import { registerRecallRoutes } from './recallRoutes.js';
+import { registerInspectionRoutes } from './inspectionRoutes.js';
 import { validatePhotoRecord } from './src/photoRules.js';
 import multer from 'multer';
 import { normalizeReviewProgress } from './src/reviewProgress.js';
@@ -559,6 +560,7 @@ app.post('/api/sharepoint/panel-records/finalize', express.json({ limit: '1mb' }
   }
 });
 
+registerInspectionRoutes(app, { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile });
 registerRecallRoutes(app, { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile });
 
 const root = path.dirname(fileURLToPath(import.meta.url));
