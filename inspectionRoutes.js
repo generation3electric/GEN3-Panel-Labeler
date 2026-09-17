@@ -21,7 +21,7 @@ export function validateInspectionPhotos(files,manifest){
 }
 function photoHashes(files,manifest){return files.map((f,i)=>({id:manifest[i].id,role:manifest[i].role,sha:createHash('sha256').update(f.buffer).digest('hex')}));}
 export function registerInspectionRoutes(app,storage){
- const {getAccessToken,getSiteListAndDrive,graph,graphBuffer,ensureFolder,uploadFile}=storage;
+ const {getAccessToken,getSiteListAndDrive,graph,graphBuffer,ensureFolder,uploadFile,jobNotes}=storage;
  const wrap=fn=>async(req,res)=>{res.set('Cache-Control','private, no-store');try{await fn(req,res);}catch(e){console.warn('Panel inspection:',e.message);res.status(e.status||500).json({error:e.status?e.message:'Inspection could not finish saving. Your photos have not been cleared; retry in a moment.'});}};
  const multipart=(req,res,next)=>upload(req,res,e=>e?res.status(400).json({error:'Use up to ten JPEG/PNG photos under 12 MB each.'}):next());
  async function context(){const token=await getAccessToken();const {drive}=await getSiteListAndDrive(token);return {token,drive};}
@@ -50,16 +50,17 @@ export function registerInspectionRoutes(app,storage){
      }
      const fingerprint=createHash('sha256').update(JSON.stringify({data,recall,hashes})).digest('hex');
      const ctx=await context();
-     try{const existing=await read(ctx,input.id);if(existing.fingerprint!==fingerprint)fail('This inspection was already saved with different details. Open history or start a new inspection.',409);return res.json(existing);}catch(e){if(e.status!==404)throw e;}
+     try{const existing=await read(ctx,input.id);if(existing.fingerprint!==fingerprint)fail('This inspection was already saved with different details. Open history or start a new inspection.',409);return res.json({...existing,jobNote:await jobNotes?.publish('inspection',existing)});}catch(e){if(e.status!==404)throw e;}
      const root=await ensureFolder(ctx.token,ctx.drive.id,null,'Panel Inspections');
      const folder=await ensureFolder(ctx.token,ctx.drive.id,root.id,input.id);
      const photos=[];
      for(let i=0;i<req.files.length;i++){const file=req.files[i],p=manifest[i],name=`${p.id}.${file.mimetype==='image/png'?'png':'jpg'}`;await uploadFile(ctx.token,ctx.drive.id,folder.id,name,file.buffer);photos.push({...p,name,url:`/api/panel-inspections/${input.id}/photos/${name}`});}
      const record={...data,id:input.id,fingerprint,photos,recall,reviewedBy:reviewer,savedAt:new Date().toISOString(),folderUrl:folder.webUrl,pdfUrl:`/api/panel-inspections/${input.id}/report.pdf`};
      const pdf=await createInspectionPdf(record,req.files.map((f,i)=>({id:manifest[i].id,buffer:f.buffer})));
-     await uploadFile(ctx.token,ctx.drive.id,folder.id,'report.pdf',pdf);
+     const pdfFile=await uploadFile(ctx.token,ctx.drive.id,folder.id,'report.pdf',pdf);
+     record.reportUrl=pdfFile?.webUrl;
      await uploadFile(ctx.token,ctx.drive.id,folder.id,'record.json',Buffer.from(JSON.stringify(record,null,2)));
-     res.status(201).json(record);
+     res.status(201).json({...record,jobNote:await jobNotes?.publish('inspection',record)});
    }finally{activeSaves.delete(input.id);}
  }));
  app.get('/api/panel-inspections',wrap(async(req,res)=>{
@@ -72,6 +73,10 @@ export function registerInspectionRoutes(app,storage){
    res.json({records,next,incomplete});
  }));
  app.get('/api/panel-inspections/:id',wrap(async(req,res)=>res.json(await read(await context(),req.params.id))));
+ for(const method of ['get','post']) app[method]('/api/panel-inspections/:id/job-note',wrap(async(req,res)=>{
+   const record=await read(await context(),req.params.id);
+   res.json(await jobNotes[method==='post'?'publish':'get']('inspection',record));
+ }));
  app.get('/api/panel-inspections/:id/report.pdf',wrap(async(req,res)=>{const ctx=await context();await read(ctx,req.params.id);const bytes=await graphBuffer(ctx.token,`${prefix(ctx,req.params.id)}/report.pdf:/content`);res.type('pdf').set('Content-Disposition',`inline; filename="${req.params.id}-report.pdf"`).send(bytes);}));
  app.get('/api/panel-inspections/:id/photos/:name',wrap(async(req,res)=>{if(!/^p-[0-9a-f-]{36}\.(jpg|png)$/.test(req.params.name))fail('Invalid photo.');const ctx=await context(),record=await read(ctx,req.params.id);if(!record.photos.some(p=>p.name===req.params.name))fail('Photo not found.',404);const bytes=await graphBuffer(ctx.token,`${prefix(ctx,req.params.id)}/${req.params.name}:/content`);res.set('X-Content-Type-Options','nosniff').type(req.params.name.endsWith('png')?'png':'jpg').send(bytes);}));
 }

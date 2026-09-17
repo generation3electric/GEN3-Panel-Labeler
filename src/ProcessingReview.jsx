@@ -1,3 +1,4 @@
+import JobNoteStatus from './JobNoteStatus.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './ProcessingReview.css';
 import PhotoGallery from './PhotoGallery.jsx';
@@ -367,6 +368,7 @@ export default function ProcessingReview({ job, panel, photoUrls, savedRecord, o
         </section>
         {finalReceipt && <div className="finalSaved noPrint"><strong>Saved to SharePoint</strong><span>The corrected directory, verification details, and final PDF are now part of this panel’s permanent record.</span>{finalReceipt.indexWarnings?.length > 0 && <small>Files were saved. Some optional SharePoint index columns are not set up yet.</small>}</div>}
         {gallery}
+        {finalReceipt && <JobNoteStatus initial={finalReceipt.jobNote} endpoint={savedRecord?.listItemId || savedRecord?.receipt?.listItemId ? `/api/sharepoint/panel-records/${encodeURIComponent(savedRecord.listItemId || savedRecord.receipt.listItemId)}/job-note` : null} />}
         <div className="finalActions noPrint"><button className="secondary" onClick={() => setPhase('review')}>Back to Review</button>{finalReceipt?.finalPdfUrl ? <a className="primary" href={finalReceipt.finalPdfUrl} target="_blank" rel="noreferrer">Open Saved PDF</a> : <button className="primary" onClick={() => window.print()}>Print Copy</button>}</div>
         <button className="secondary noPrint printCopyButton" onClick={() => window.print()}>Print Another Copy</button>
         <div className="nextProcessCard noPrint"><span>Next process</span><strong>Panel Load Calculation</strong><p>Use the verified breakers, appliance circuits and service size as the starting point for the load-calculation workflow.</p></div>

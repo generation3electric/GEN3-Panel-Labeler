@@ -1,4 +1,5 @@
 import express from 'express';
+import { createJobNotePublisher, createSharePointNoteStore } from './serviceTitanJobNotes.js';
 import { registerRecallRoutes } from './recallRoutes.js';
 import { registerInspectionRoutes } from './inspectionRoutes.js';
 import { validatePhotoRecord } from './src/photoRules.js';
@@ -42,10 +43,10 @@ async function getAccessToken() {
   if (!response.ok) throw new Error(data.error_description || 'Microsoft authentication failed.');
   return data.access_token;
 }
-async function getServiceTitanAccessToken() {
+async function getServiceTitanAccessToken(signal) {
   if (!serviceTitanConfigured()) throw new Error('ServiceTitan is not configured on Railway.');
   const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: process.env.SERVICETITAN_CLIENT_ID, client_secret: process.env.SERVICETITAN_CLIENT_SECRET });
-  const response = await fetch(SERVICETITAN_AUTH_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
+  const response = await fetch(SERVICETITAN_AUTH_URL, { signal: signal || AbortSignal.timeout(15000), method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
   const text = await response.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
@@ -57,7 +58,7 @@ async function getServiceTitanAccessToken() {
   return data.access_token;
 }
 async function serviceTitan(pathname, options = {}) {
-  const token = options.token || await getServiceTitanAccessToken();
+  const token = options.token || await getServiceTitanAccessToken(options.signal);
   const response = await fetch(`${SERVICETITAN_API_URL}${pathname}`, {
     ...options,
     token: undefined,
@@ -487,7 +488,7 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
       Title: `${record.job.id} — ${record.panel.name}`,
       'ServiceTitan Job Number': String(record.job.id), 'ServiceTitan Job ID': String(record.job.serviceTitanId || record.job.id), 'Panel Record ID': record.recordId,
       'Panel Name': record.panel.name, 'Service Address': record.job.address, 'Record Status': 'AI processed — needs verification',
-      'Job Note Status': 'Pending ServiceTitan connection', 'Folder Link': panelFolder.webUrl, 'Captured Photos': record.capturedCount,
+      'Job Note Status': 'Awaiting final directory', 'Folder Link': panelFolder.webUrl, 'Captured Photos': record.capturedCount,
       'Skipped Photos': record.skippedCount, 'Captured By': record.capturedBy || '', 'Captured At': record.capturedAt,
     };
     const item = await graph(token, `/sites/${site.id}/lists/${list.id}/items`, { method: 'POST', body: JSON.stringify({ fields: { Title: values.Title } }) });
@@ -515,10 +516,15 @@ app.post('/api/sharepoint/panel-records/finalize', express.json({ limit: '1mb' }
     const token = await getAccessToken();
     const { site, list } = await getSiteAndList(token);
     const folder = await resolvePanelFolder(token, req.body || {});
+    // Use the saved panel's job identity, never a request-supplied job number fallback.
+    const metadata = JSON.parse((await graphBuffer(token, `/drives/${folder.driveId}/items/${folder.folderId}:/${encodeURIComponent(safeName(directory.recordId) + '-record.json')}:/content`)).toString());
+    if (metadata.recordId !== directory.recordId) throw new Error('The panel record does not match the saved folder.');
+    directory.job = { ...directory.job, ...metadata.job, serviceTitanId: String(metadata.job?.serviceTitanId || ''), referenceType: metadata.job?.referenceType || '' };
     const pdf = await createFinalDirectoryPdf(directory);
     const baseName = safeName(directory.recordId);
     const jsonFile = await uploadFile(token, folder.driveId, folder.folderId, `${baseName}-verified-directory.json`, Buffer.from(JSON.stringify(directory, null, 2)));
     const pdfFile = await uploadFile(token, folder.driveId, folder.folderId, `${baseName}-panel-directory.pdf`, pdf);
+    const jobNote = await jobNotes.publish('directory', { ...directory, finalPdfUrl: pdfFile.webUrl, folderUrl: folder.folderUrl });
 
     const columns = await graph(token, `/sites/${site.id}/lists/${list.id}/columns?$select=name,displayName`);
     const internalName = (displayName) => columns.value.find((column) => column.displayName === displayName)?.name;
@@ -530,6 +536,7 @@ app.post('/api/sharepoint/panel-records/finalize', express.json({ limit: '1mb' }
         'Verified By': directory.verifiedBy,
         'Verified At': directory.verifiedAt,
         'Final Directory Link': pdfFile.webUrl,
+        'Job Note Status': jobNote.status === 'sent' ? 'Sent' : jobNote.message,
       };
       for (const [displayName, value] of Object.entries(values)) {
         const name = internalName(displayName);
@@ -552,6 +559,7 @@ app.post('/api/sharepoint/panel-records/finalize', express.json({ limit: '1mb' }
       folderUrl: folder.folderUrl,
       finalPdfUrl: pdfFile.webUrl,
       verifiedDirectoryUrl: jsonFile.webUrl,
+      jobNote,
       indexWarnings,
     });
   } catch (error) {
@@ -560,8 +568,27 @@ app.post('/api/sharepoint/panel-records/finalize', express.json({ limit: '1mb' }
   }
 });
 
-registerInspectionRoutes(app, { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile });
-registerRecallRoutes(app, { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile });
+const reportStorage = { getAccessToken, getSiteListAndDrive, graph, graphBuffer, ensureFolder, uploadFile };
+const jobNotes = createJobNotePublisher({ store: createSharePointNoteStore(reportStorage), serviceTitan, tenantId: process.env.SERVICETITAN_TENANT_ID, publicUrl: process.env.AUTH_PUBLIC_URL });
+registerInspectionRoutes(app, { ...reportStorage, jobNotes });
+registerRecallRoutes(app, { ...reportStorage, jobNotes });
+
+for (const method of ['get', 'post']) app[method]('/api/sharepoint/panel-records/:itemId/job-note', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const token = await getAccessToken();
+    const ctx = await loadPanelContext(token, req.params.itemId);
+    const baseName = safeName(ctx.indexRecord.recordId);
+    const file = ctx.files.find(f => f.name === `${baseName}-verified-directory.json`);
+    const pdf = ctx.files.find(f => f.name === `${baseName}-panel-directory.pdf`);
+    const metadata = await loadJsonFile(token, ctx.drive.id, ctx.files.find(f => f.name === `${baseName}-record.json`));
+    if (!file || !pdf || !metadata) return res.status(404).json({ error: 'Finalize and save this panel directory before adding a job note.' });
+    const directory = await loadJsonFile(token, ctx.drive.id, file);
+    const record = { ...directory, job: metadata.job, finalPdfUrl: pdf.webUrl, folderUrl: ctx.folder.webUrl };
+    const delivery = await jobNotes[method === 'post' ? 'publish' : 'get']('directory', record);
+    res.json(delivery);
+  } catch (e) { res.status(e.status || 500).json({ error: 'The saved directory job note could not be loaded. Please retry.' }); }
+});
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(root, 'dist')));

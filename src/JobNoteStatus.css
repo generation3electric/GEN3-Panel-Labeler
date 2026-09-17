@@ -1,0 +1,1 @@
+.jobNoteStatus{margin:20px 0;padding:18px;border:1px solid #c5d5e0;border-radius:12px;background:#f2f6fa;color:#193b55}.jobNoteStatus.sent{border-color:#9ebeb7;background:#f1f8f5}.jobNoteStatus p{margin:8px 0;line-height:1.5}.jobNoteStatus button{margin-top:8px;min-height:44px}.jobNoteStatus small{display:block;margin-top:8px}@media print{.jobNoteStatus{display:none}}

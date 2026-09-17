@@ -75,10 +75,11 @@ test('image uploads require genuine supported headers and an overview', () => {
 });
 
 test('saved history is independent, photos write before manifest, retries are idempotent, and partial uploads do not save', async (t) => {
-  const files = new Map(); let failPhoto = false; const writes = [];
+  const files = new Map(); let failPhoto = false; const writes = []; const noteCalls = [];
   const notFound = () => Object.assign(new Error('Not found'), {status:404});
   const app = express(); app.use(express.json());
   registerRecallRoutes(app, {
+    jobNotes:{publish:async(kind,record)=>{assert.ok(files.has(`${record.id}/record.json`));noteCalls.push({kind,record});return {status:'failed',message:'Retry job note'};},get:async()=>({status:'failed'})},
     getAccessToken:async () => 'test', getSiteListAndDrive:async () => ({drive:{id:'drive'}}),
     graph:async () => ({value:[]}), ensureFolder:async (_t,_d,_p,name) => ({id:name,webUrl:'https://example.sharepoint.com/RecallChecks'}),
     graphBuffer:async (_t,path) => { const match = path.match(/Recall Checks\/(RC-[^/]+)\/([^:]+):\/content/); const key=match && `${match[1]}/${match[2]}`; if (!files.has(key)) throw notFound(); return files.get(key); },
@@ -92,7 +93,9 @@ test('saved history is independent, photos write before manifest, retries are id
   const form = (overrides={}) => { const f=new FormData();f.append('overview',new Blob([Buffer.from([255,216,255,224])],{type:'image/jpeg'}),'overview.jpg');f.append('record',JSON.stringify({...input,...overrides}));return f; };
   let r=await fetch(base+'/api/recall-checks',{method:'POST',body:form()});assert.equal(r.status,401);
   r=await fetch(base+'/api/recall-checks',{method:'POST',headers:{'x-gen3-employee':user},body:form()});assert.equal(r.status,201);
-  const saved=await r.json();assert.equal(saved.status,'possible');assert.equal(saved.checkedBy.name,'Test Employee');assert.equal(writes.at(-1),'record.json');
+  const saved=await r.json();assert.equal(saved.status,'possible');assert.equal(saved.checkedBy.name,'Test Employee');assert.equal(writes.at(-1),'record.json');assert.equal(saved.jobNote.status,'failed');assert.equal(noteCalls.length,1);
+  const noteResponse=await fetch(base+`/api/recall-checks/${saved.id}/job-note`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({job:{serviceTitanId:'wrong-job'}})});assert.equal((await noteResponse.json()).status,'failed');assert.equal(noteCalls.length,2);assert.equal(noteCalls[1].record.job,null);
+  assert.equal((await (await fetch(base+`/api/recall-checks/${saved.id}/job-note`)).json()).status,'failed');
   const count=writes.length;
   r=await fetch(base+'/api/recall-checks',{method:'POST',headers:{'x-gen3-employee':user},body:form()});assert.equal(r.status,200);assert.equal(writes.length,count);
   r=await fetch(base+'/api/recall-checks',{method:'POST',headers:{'x-gen3-employee':user},body:form({notes:'Changed after save'})});assert.equal(r.status,409);

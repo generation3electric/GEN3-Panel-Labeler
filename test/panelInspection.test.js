@@ -57,9 +57,9 @@ test('inspection photo validation rejects unsupported media, duplicate IDs, and 
 
 test('save binds AI evidence to photos, preserves partial drafts, commits manifest last, and is idempotent',async(t)=>{
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aG3sAAAAASUVORK5CYII=','base64');
- const files=new Map(),writes=[];let failFile='';
+ const files=new Map(),writes=[],noteCalls=[];let failFile='';
  const app=express();app.use(express.json());
- registerInspectionRoutes(app,{getAccessToken:async()=> 'test',getSiteListAndDrive:async()=>({drive:{id:'drive'}}),
+ registerInspectionRoutes(app,{jobNotes:{publish:async(kind,record)=>{assert.ok(files.has(`${record.id}/record.json`));noteCalls.push({kind,record});return {status:'failed',message:'Retry job note'};},get:async()=>({status:'failed'})},getAccessToken:async()=> 'test',getSiteListAndDrive:async()=>({drive:{id:'drive'}}),
  ensureFolder:async(_t,_d,_p,name)=>({id:name,webUrl:'https://example.sharepoint.com/PanelInspections'}),
  graph:async()=>({value:[{folder:{},name:input().id}]}),
  graphBuffer:async(_t,path)=>{const m=path.match(/Panel Inspections\/(INS-[^/]+)\/([^:]+):\/content/),key=m&&`${m[1]}/${m[2]}`;if(!files.has(key))throw Object.assign(new Error('Not found'),{status:404});return files.get(key);},
@@ -72,7 +72,9 @@ test('save binds AI evidence to photos, preserves partial drafts, commits manife
  const stale=seal({kind:'inspection-analysis',analysis:{findings:[]},photos:[{...photos[0],sha:'wrong'}]});assert.equal((await post({analysisEvidence:stale})).status,400);
  const signed=seal({kind:'inspection-analysis',analysis:{findings:[finding],qualityWarnings:[]},photos:[{...photos[0],sha:createHash('sha256').update(png).digest('hex')}]});assert.equal((await post({analysisEvidence:signed})).status,400);
  failFile='report.pdf';assert.equal((await post()).status,500);assert.equal(files.has(`${input().id}/record.json`),false);
- failFile='';const response=await post();assert.equal(response.status,201);const saved=await response.json();assert.equal(saved.reviewedBy.name,'Test Technician');assert.equal(writes.at(-1),'record.json');assert.equal(saved.age.yearFrom,2017);
+ failFile='';const response=await post();assert.equal(response.status,201);const saved=await response.json();assert.equal(saved.reviewedBy.name,'Test Technician');assert.equal(writes.at(-1),'record.json');assert.equal(saved.age.yearFrom,2017);assert.equal(saved.jobNote.status,'failed');assert.equal(noteCalls.length,1);
+ const noteResponse=await fetch(base+`/api/panel-inspections/${saved.id}/job-note`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({job:{serviceTitanId:'wrong-job'}})});assert.equal((await noteResponse.json()).status,'failed');assert.equal(noteCalls.length,2);assert.equal(noteCalls[1].record.job,null);
+ assert.equal((await (await fetch(base+`/api/panel-inspections/${saved.id}/job-note`)).json()).status,'failed');
  const count=writes.length;assert.equal((await post()).status,200);assert.equal(writes.length,count);assert.equal((await post({notes:'Changed'})).status,409);
  const pdf=await fetch(base+saved.pdfUrl);assert.equal(pdf.headers.get('content-type'),'application/pdf');assert.ok(Buffer.from(await pdf.arrayBuffer()).toString('ascii',0,5)==='%PDF-');
  assert.equal((await (await fetch(base+'/api/panel-inspections')).json()).records.length,1);
