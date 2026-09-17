@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import RecallCheck from './RecallCheck.jsx';
 import ProcessingReview from './ProcessingReview.jsx';
 import PastRecords from './PastRecords.jsx';
 import './styles.css';
@@ -30,7 +31,9 @@ const demoPanel = {
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {pastRecords ? (
+    {pathname.startsWith('/recall-check') ? (
+      <RecallCheck />
+    ) : pastRecords ? (
       <PastRecords />
     ) : processingPreview ? (
       <ProcessingReview

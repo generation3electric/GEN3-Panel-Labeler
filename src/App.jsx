@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
+import './RecallCheck.css';
 import PanelFlipControl from './PanelFlipControl.jsx';
 import UploadActivity from './UploadActivity.jsx';
 import PhotoGallery from './PhotoGallery.jsx';
@@ -305,6 +306,7 @@ export default function App() {
               <button type="button" className="secondary" onClick={() => { setActivityOpen(true); refreshLocalPanels(); }}>Pending / Recently Uploaded{pendingCount ? ` (${pendingCount})` : ''}</button>
               <a className="secondary" href="/past-records">Past Jobs</a>
             </div>
+            <div className="recallHomeCard"><h2>Panel Recall Check</h2><p>Check a panel against official recall notices using its photos and label details.</p><a className="primary" href="/recall-check">Start Recall Check</a><a className="secondary" href="/recall-check/history">Recall Check History</a></div>
             {pendingCount > 0 && <div className="infoStrip"><strong>{pendingCount} panel{pendingCount === 1 ? '' : 's'} waiting to upload.</strong> {online ? 'Sync will retry automatically.' : 'They are stored on this device until service returns.'}</div>}
           </section>
         )}

@@ -66,3 +66,47 @@ npm run build
 
 1. Calibrate local quality thresholds against real field photographs and device cameras. These screens do not perform OCR or prove legibility.
 2. Add office review routing for low-confidence AI results.
+
+## Standalone Panel Recall Check
+
+Start from **Panel Recall Check** on the home screen or `/recall-check`. This is
+independent of breaker directories and the Panel Record Index. Technicians can
+optionally select a real ServiceTitan appointment, capture an overview and label
+photos (or document a missing label), review AI-transcribed identifiers, search
+CPSC, and save the findings. `/recall-check/history` lists the saved checks with
+pagination, search within loaded records, source notices, and original photos.
+
+- Uses the existing Microsoft employee gateway and OpenAI/SharePoint settings;
+  no new secret, database, list, or permission is required.
+- Saves a manifest and photos to `Recall Checks/<check-id>/` in the existing
+  SharePoint document library. The manifest is written last; incomplete uploads
+  are not represented as successful saves. Duplicate identical submissions are
+  idempotent, and conflicting reuse of a saved ID is rejected.
+- IndexedDB keeps one unsaved draft, including photos, on the device. Reading AI
+  labels, searching official notices, and saving shared history require internet.
+  Draft storage errors remain visible; there is no automatic offline recall lookup.
+- CPSC searches use product categories plus manufacturer aliases and descriptions.
+  The server caches successful responses for up to one hour; results retain each
+  source query and retrieval timestamp. Any failed query makes the lookup
+  incomplete, never a negative finding. A missing brand or missing model cannot
+  produce an automatic no-match result.
+- Brand/model discovery is deliberately conservative. It includes potentially
+  relevant breaker notices as well as panel notices. It never automatically
+  declares a match from a model token alone. The technician must verify product,
+  production limits, exceptions, and any required manufacturer inspection before
+  recording a match or exclusion, with an evidence note.
+- Manufacturer-only safety bulletins, general condition concerns, and proof of
+  electrical safety are outside the CPSC search scope. Links to official notices
+  include manufacturer follow-up instructions. `No matching recall found` is
+  limited to the recorded sources and criteria; it is not a safety certification.
+- Lookup snapshots are signed server-side so a modified client cannot save a
+  forged recall status or source response. Checked-by identity is supplied by the
+  authenticated gateway, not a user-editable name field.
+
+Official interface documentation:
+https://www.cpsc.gov/Recalls/CPSC-Recalls-Application-Program-Interface-API-Information
+
+Validation: `npm test` covers partial-feed failures, missing identifiers, official
+source validation, technician confirmation requirements, evidence tampering,
+image validation, separate save/read behavior, idempotent retries, and interrupted
+uploads. `npm run build` creates the production client.
