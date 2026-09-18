@@ -102,4 +102,9 @@ test('saved history is independent, photos write before manifest, retries are id
   r=await fetch(base+`/api/recall-checks/${input.id}`);assert.equal((await r.json()).id,input.id);
   failPhoto=true;const newId='RC-1770000000001-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
   r=await fetch(base+'/api/recall-checks',{method:'POST',headers:{'x-gen3-employee':user},body:form({id:newId})});assert.equal(r.status,500);assert.equal(files.has(`${newId}/record.json`),false);
+  failPhoto=false;
+  const source={kind:'inspection',recordId:'INS-source',photoKey:'p-overview',sourceDate:'2025-01-01',reusedAt:'2026-09-18',currentConditionConfirmed:true};
+  const reused=await fetch(base+'/api/recall-checks',{method:'POST',headers:{'x-gen3-employee':user},body:form({id:'RC-1770000000002-cccccccc-cccc-cccc-cccc-cccccccccccc',photoSources:[{role:'label',source:{...source,photoKey:'wrong'}},{role:'overview',source}]})});
+  assert.equal(reused.status,201);assert.deepEqual((await reused.json()).photos[0].source,source);
+
 });

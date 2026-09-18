@@ -80,6 +80,9 @@ test('save binds AI evidence to photos, preserves partial drafts, commits manife
  assert.equal((await (await fetch(base+'/api/panel-inspections')).json()).records.length,1);
  assert.equal((await fetch(base+saved.photos[0].url)).status,200);
  assert.equal((await fetch(base+`/api/panel-inspections/${input().id}/photos/p-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.png`)).status,404);
+ const reusedSource={kind:'directory',recordId:'PNL-source',photoKey:'overview',sourceDate:'2025-01-01',reusedAt:'2026-09-18',currentConditionConfirmed:true};
+ const reuseResponse=await post({id:'INS-1770000000002-cccccccc-cccc-cccc-cccc-cccccccccccc',photos:[{...photos[0],source:reusedSource}]});assert.equal(reuseResponse.status,201);
+ assert.deepEqual((await reuseResponse.json()).photos[0].source,reusedSource);
  const otherId='INS-1770000000001-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
  const oldRecall=seal({version:1,notices:[],identification:identity,checkedAt:'2020-01-01'});assert.equal((await post({id:otherId,recallEvidence:oldRecall})).status,400);
  const mismatch=seal({version:1,notices:[],identification:{...identity,model:'Other'},checkedAt:new Date().toISOString()});assert.equal((await post({id:otherId,recallEvidence:mismatch})).status,400);

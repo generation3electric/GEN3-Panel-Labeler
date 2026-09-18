@@ -1,3 +1,5 @@
+import SharedPhotoPicker from './SharedPhotoPicker.jsx';
+import { labelerPhotoDraft, clearLabelerPhotoDraft } from './sharedPhotoLibrary.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ProcessingReview from './ProcessingReview.jsx';
 import './RecallCheck.css';
@@ -61,6 +63,37 @@ export default function App() {
   const [manufacturerPhoto, setManufacturerPhoto] = useState(null);
   const [unavailable, setUnavailable] = useState({ manufacturer: { reason: '', details: '' }, directory: { reason: '', details: '' } });
   const [coverageConfirmed, setCoverageConfirmed] = useState(false);
+  const photoOrigins = useRef(new WeakMap());
+  const captureDraftId = useRef(`capture-${crypto.randomUUID()}`);
+  const photoDraftSequence = useRef(Promise.resolve());
+  const photoDraftTimer = useRef(null);
+  const [reuseDraftWarning, setReuseDraftWarning] = useState('');
+  const existingSharedPhotos = [overview && { role: 'overview', file: overview }, ...leftPhotos.map(file => ({ role: 'left', file })), ...rightPhotos.map(file => ({ role: 'right', file })), manufacturerPhoto && { role: 'label', file: manufacturerPhoto }, directory && { role: 'directory', file: directory }].filter(Boolean).map(p => ({...p,source:photoOrigins.current.get(p.file)}));
+  useEffect(() => {
+    if (!job) return;
+    if (!existingSharedPhotos.length) { const emptyCaptureId = captureDraftId.current; photoDraftSequence.current = photoDraftSequence.current.catch(() => {}).then(() => clearLabelerPhotoDraft(emptyCaptureId)); return; }
+    const value = { id: captureDraftId.current, job, panel, capturedAt: new Date().toISOString(), photos: existingSharedPhotos.map(p => ({ ...p, source: photoOrigins.current.get(p.file) })) };
+    const timer = photoDraftTimer.current = setTimeout(() => {
+      photoDraftSequence.current = photoDraftSequence.current.catch(() => {}).then(() => labelerPhotoDraft('put', value));
+      photoDraftSequence.current.then(() => setReuseDraftWarning('')).catch(() => setReuseDraftWarning('Photo reuse on this device could not be saved. Keep this page open until you save the panel.'));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [job, panel, overview, leftPhotos, rightPhotos, manufacturerPhoto, directory]);
+  function importSharedPhotos({ source, photos }) {
+    for (const photo of photos) photoOrigins.current.set(photo.file, photo.source);
+    for (const photo of photos) {
+      if (photo.role === 'overview') setOverview(photo.file);
+      if (photo.role === 'label') { setManufacturerPhoto(photo.file); setUnavailable(v => ({ ...v, manufacturer: { reason: '', details: '' } })); }
+      if (photo.role === 'directory') { setDirectory(photo.file); setUnavailable(v => ({ ...v, directory: { reason: '', details: '' } })); }
+    }
+    setLeftPhotos(v => [...v, ...photos.filter(p => p.role === 'left').map(p => p.file)]);
+    setRightPhotos(v => [...v, ...photos.filter(p => p.role === 'right').map(p => p.file)]);
+    if (photos.some(p => p.role === 'label')) {
+      const brand = source.record?.identity?.manufacturer || source.record?.snapshot?.identification?.manufacturer || source.record?.panel?.manufacturer;
+      if (manufacturers.includes(brand)) setPanel(v => ({ ...v, manufacturer: v.manufacturer === 'Unknown' ? brand : v.manufacturer }));
+    }
+    setCoverageConfirmed(false);
+  }
   const allPhotos = useMemo(() => [overview, ...leftPhotos, ...rightPhotos, manufacturerPhoto, directory].filter(Boolean), [overview, leftPhotos, rightPhotos, manufacturerPhoto, directory]);
   const [photoChecks, updatePhotoCheck] = usePhotoChecks(allPhotos);
   const guidance = photoGuidance(panel.spaces);
@@ -146,6 +179,9 @@ export default function App() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Upload failed.');
     await markPanelUploaded(item.recordId, result);
+    if (item.record?.captureDraftId === captureDraftId.current) clearTimeout(photoDraftTimer.current);
+    await photoDraftSequence.current.catch(() => {});
+    await clearLabelerPhotoDraft(item.record?.captureDraftId).catch(() => {});
     return result;
   }
 
@@ -181,6 +217,7 @@ export default function App() {
   }, [step, jobDate]);
 
   function reset() {
+    captureDraftId.current = `capture-${crypto.randomUUID()}`;
     setReviewingUploaded(false);
     clearPhotoDetails();
     setStep(0); setJob(null); setQuery(''); setPanel({ name: 'Main Panel', manufacturer: 'Unknown', mainAmps: '', spaces: '', labels: 'Partial', numberingOrigin: 'top-left' });
@@ -197,15 +234,15 @@ export default function App() {
       ...['manufacturer', 'directory'].map((key) => ({ key, title: key === 'manufacturer' ? 'Manufacturer Label' : 'Existing Panel Directory', status: (key === 'manufacturer' ? manufacturerPhoto : directory) ? 'Captured' : 'Not available', reason: (key === 'manufacturer' ? manufacturerPhoto : directory) ? '' : unavailableReason(unavailable[key]) })),
     ];
     const skippedPhotos = Object.fromEntries(photoManifest.filter((item) => item.status === 'Not available').map((item) => [item.key, item.reason]));
-    const record = { recordId, capturedAt, capturedBy: '', job, panel, capturedCount, skippedCount: Object.keys(skippedPhotos).length, skippedPhotos, photoSteps: photoManifest,
+    const record = { recordId, captureDraftId: captureDraftId.current, capturedAt, capturedBy: '', job, panel, capturedCount, skippedCount: Object.keys(skippedPhotos).length, skippedPhotos, photoSteps: photoManifest,
       photoRulesVersion: PHOTO_RULES_VERSION, photoGuidance: guidance, coverageConfirmed, qualityExceptions };
     const photos = [];
     const add = (key, file, sort) => {
       if (!file) return;
       const extension = file.name?.includes('.') ? file.name.split('.').pop() : 'jpg';
       const name = `${String(sort).padStart(2, '0')}-${key}.${extension}`;
-      photos.push({ file, name, type: file.type || 'image/jpeg' });
-      Object.assign(photoManifest.find((item) => item.key === key), { filename: name, quality: photoChecks.get(file) });
+      photos.push({ file, name, type: file.type || 'image/jpeg', source: photoOrigins.current.get(file) });
+      Object.assign(photoManifest.find((item) => item.key === key), { filename: name, quality: photoChecks.get(file), source: photoOrigins.current.get(file) });
     };
     add('overview', overview, 1);
     leftPhotos.forEach((file, i) => add(`left-${i + 1}`, file, 10 + i));
@@ -247,6 +284,7 @@ export default function App() {
   }
 
   function resetAfterLocalSave() {
+    captureDraftId.current = `capture-${crypto.randomUUID()}`;
     clearPhotoDetails();
     setOverview(null); setLeftPhotos([]); setRightPhotos([]); setDirectory(null); setStep(0); setJob(null);
   }
@@ -348,6 +386,8 @@ export default function App() {
           <section>
             <p className="eyebrow">3 · Panel photos</p><h1>Photograph what the AI needs.</h1>
             <p className="lead compact">Complete breaker coverage matters more than a fixed photo count. Photos stay on this device until a confirmed upload succeeds.</p>
+            <SharedPhotoPicker key={`${job?.serviceTitanId || job?.id}:${panel.name}`} target="directory" job={job} panelName={panel.name} existing={existingSharedPhotos} excludeId={captureDraftId.current} onImport={importSharedPhotos} />
+            {reuseDraftWarning && <p role="alert">{reuseDraftWarning}</p>}
             <div className="photoPlan"><strong>{guidance.spaces ? `${guidance.spaces}-space panel` : 'Panel size unknown'}</strong><p>{guidance.text}</p><span>Also capture an overview and the manufacturer and directory labels, or record why each label is unavailable.</span></div>
             <div style={{ display: 'grid', gap: 18 }}>
               <div className="completionCard" style={{ display: 'grid' }}><div><strong>1. Full panel overview</strong><span>One photo showing the whole open panel.</span></div>{overview ? <PhotoTile file={overview} {...photoProps(overview)} label="Overview" onRemove={() => setOverview(null)} /> : <AddPhotoButton onFiles={(files) => setOverview(files[0] || null)}>Take overview photo</AddPhotoButton>}</div>
