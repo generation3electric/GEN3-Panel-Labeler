@@ -191,3 +191,35 @@ note; it does not blindly resend. If a note never appears, the office must confi
 the outcome before an administrator resets that receipt. There is no background
 retry worker. Repeated finalization uses the same permanent PDF link and does not
 add another note for that same panel record.
+
+## Reuse existing panel photos
+
+All three capture screens now have **Use existing panel photos**. Pick a saved
+panel, review its thumbnails and date, and confirm that the selected photos show
+the same physical panel in its current condition. Overview and manufacturer-label
+slots are suggested automatically when empty. Other requirements can be assigned
+explicitly; a breaker close-up never silently counts as full interior coverage.
+Existing photos are preserved, and each section's photo limits still apply.
+
+The picker combines saved SharePoint records, pending directory uploads, and
+recall/inspection drafts on the current device. One in-progress directory capture
+is also cached for reuse when switching sections. Its copy is cleared after a
+successful upload, or superseded by another directory capture. Removing all photos
+from the active directory capture clears its cached copy. Offline reuse requires
+that the app is already loaded and the source photos are stored on that device.
+Shared history and downloading remote photos require internet.
+
+When a job is selected, the picker initially shows that job's records. **Include
+other jobs and earlier visits** is an explicit option, with a current-condition
+confirmation. No job link changes during photo reuse. Panel name, address, job and
+record date remain visible so different panels at the same property are not treated
+as interchangeable. **Load more saved panels** pages through older history; failures
+in one source do not hide the other sources.
+
+Imported images are prepared as JPEGs and copied into the receiving draft only
+after all selected downloads succeed. The original record stays unchanged. Reuse
+records retain source workflow, record, photo reference and source date. Existing
+identification fields are never overwritten; an imported label can fill empty fields
+as suggestions. Recall evidence, inspection AI findings and verification status
+are reset when photos are imported and must be reviewed in the destination workflow.
+No extra credentials, permissions or infrastructure are needed.

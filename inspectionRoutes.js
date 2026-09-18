@@ -1,3 +1,4 @@
+import { normalizePhotoSource } from './src/sharedPhotoModel.js';
 import multer from 'multer';
 import { createHash } from 'node:crypto';
 import { seal, unseal, validateImages } from './recallRoutes.js';
@@ -17,7 +18,7 @@ export function validateInspectionPhotos(files,manifest){
  for(const f of files){validateImages([f]);if(!['image/jpeg','image/png'].includes(f.mimetype))fail('Inspection reports require JPEG or PNG images.');}
  if(new Set(manifest.map(p=>p.id)).size!==manifest.length)fail('Photo IDs must be unique.');
  for(const p of manifest)if(!photoIdPattern.test(p.id)||!ROLES[p.role])fail('Invalid inspection photo.');
- return manifest.map(p=>({id:p.id,role:p.role}));
+ return manifest.map(p=>({id:p.id,role:p.role,...(p.source?{source:normalizePhotoSource(p.source)}:{})}));
 }
 function photoHashes(files,manifest){return files.map((f,i)=>({id:manifest[i].id,role:manifest[i].role,sha:createHash('sha256').update(f.buffer).digest('hex')}));}
 export function registerInspectionRoutes(app,storage){

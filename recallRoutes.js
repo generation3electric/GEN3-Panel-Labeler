@@ -1,3 +1,4 @@
+import { normalizePhotoSource } from './src/sharedPhotoModel.js';
 import multer from 'multer';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { checkRecalls, applyDecisions } from './recallCheck.js';
@@ -61,6 +62,8 @@ export function registerRecallRoutes(app, storage) {
     const job = input.job ? { id: bounded(input.job.id), serviceTitanId: bounded(input.job.serviceTitanId), customer: bounded(input.job.customer), address: bounded(input.job.address) } : null;
     const inputHash = createHash('sha256').update(JSON.stringify({ evidence: input.evidence, decisions: decision.decisions, job, panelName: bounded(input.panelName), notes: bounded(input.notes, 4000), labelUnavailable: bounded(input.labelUnavailable) }));
     files.forEach((file) => { inputHash.update(file.fieldname); inputHash.update(file.buffer); });
+    const photoSources = Array.isArray(input.photoSources) ? input.photoSources.slice(0,6).map(p => ({ role: bounded(p.role,20), source: normalizePhotoSource(p.source) })) : [];
+    if (photoSources.some(p => p.source)) inputHash.update(JSON.stringify(photoSources));
     const fingerprint = inputHash.digest('hex');
     const ctx = await context();
     try {
@@ -70,12 +73,14 @@ export function registerRecallRoutes(app, storage) {
     } catch (error) { if (error.status !== 404) throw error; }
     const root = await ensureFolder(ctx.token, ctx.drive.id, null, 'Recall Checks');
     const folder = await ensureFolder(ctx.token, ctx.drive.id, root.id, input.id);
-    const photos = [];
+    const photos = []; const roleCounts = {};
     for (const [index, file] of files.entries()) {
       const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[file.mimetype];
       const name = `photo-${file.fieldname}-${index}.${ext}`;
       await uploadFile(ctx.token, ctx.drive.id, folder.id, name, file.buffer);
-      photos.push({ role: file.fieldname, name, url: `/api/recall-checks/${input.id}/photos/${name}` });
+      const position = roleCounts[file.fieldname] || 0; roleCounts[file.fieldname] = position + 1;
+      const source = photoSources.filter(p => p.role === file.fieldname)[position]?.source;
+      photos.push({ role: file.fieldname, name, ...(source ? {source} : {}), url: `/api/recall-checks/${input.id}/photos/${name}` });
     }
     const record = { id: input.id, fingerprint, panelName: bounded(input.panelName) || 'Main Panel', job, notes: bounded(input.notes, 4000), labelUnavailable: bounded(input.labelUnavailable),
       snapshot, ...decision, checkedBy: user, savedAt: new Date().toISOString(), folderUrl: folder.webUrl, photos };
@@ -101,7 +106,7 @@ export function registerRecallRoutes(app, storage) {
       for (const result of results) {
         if (result.status !== 'fulfilled') { incomplete++; continue; }
         const r = result.value;
-        records.push({ id: r.id, panelName: r.panelName, job: r.job, status: r.status, checkedAt: r.snapshot.checkedAt, manufacturer: r.snapshot.identification.manufacturer, model: r.snapshot.identification.model, checkedBy: r.checkedBy.name });
+        records.push({ id: r.id, panelName: r.panelName, job: r.job, status: r.status, checkedAt: r.snapshot.checkedAt, savedAt: r.savedAt, manufacturer: r.snapshot.identification.manufacturer, model: r.snapshot.identification.model, checkedBy: r.checkedBy.name });
       }
     }
     let next = null;

@@ -1,6 +1,7 @@
 import express from 'express';
 import { createJobNotePublisher, createSharePointNoteStore } from './serviceTitanJobNotes.js';
-import { registerRecallRoutes } from './recallRoutes.js';
+import { normalizePhotoSource } from './src/sharedPhotoModel.js';
+import { registerRecallRoutes, seal, unseal } from './recallRoutes.js';
 import { registerInspectionRoutes } from './inspectionRoutes.js';
 import { validatePhotoRecord } from './src/photoRules.js';
 import multer from 'multer';
@@ -297,7 +298,13 @@ app.get('/api/sharepoint/panel-records', async (req, res) => {
     const { site, list } = await getSiteAndList(token);
     const columns = await graph(token, `/sites/${site.id}/lists/${list.id}/columns?$select=name,displayName`);
     const displayByInternal = Object.fromEntries(columns.value.map((c) => [c.name, c.displayName]));
-    const items = await graph(token, `/sites/${site.id}/lists/${list.id}/items?$expand=fields&$top=200`);
+    let historyPath = `/sites/${site.id}/lists/${list.id}/items?$expand=fields&$top=200`;
+    if (req.query.cursor) {
+      const cursor = unseal(req.query.cursor);
+      if (cursor.kind !== 'directory-history' || cursor.site !== site.id || cursor.list !== list.id) return res.status(400).json({error:'Invalid history page.'});
+      historyPath = cursor.path;
+    }
+    const items = await graph(token, historyPath);
     const records = items.value.map((item) => {
       const fields = {};
       for (const [key, value] of Object.entries(item.fields || {})) fields[displayByInternal[key] || key] = value;
@@ -305,7 +312,13 @@ app.get('/api/sharepoint/panel-records', async (req, res) => {
     }).sort((a, b) => String(b.capturedAt).localeCompare(String(a.capturedAt)));
     const q = String(req.query.q || '').trim().toLowerCase();
     const filtered = q ? records.filter((r) => `${r.jobNumber} ${r.address} ${r.panelName} ${r.recordId}`.toLowerCase().includes(q)) : records;
-    res.json({ records: filtered });
+    let next = null;
+    if (items['@odata.nextLink']) {
+      const u = new URL(items['@odata.nextLink']);
+      if (u.origin !== 'https://graph.microsoft.com' || !u.pathname.startsWith('/v1.0/')) throw new Error('Invalid history continuation.');
+      next = seal({kind:'directory-history',site:site.id,list:list.id,path:u.pathname.slice(5)+u.search});
+    }
+    res.set('Cache-Control','private, no-store').json({ records: filtered, next });
   } catch (error) {
     console.error('SharePoint history failed:', error);
     res.status(error.status || 500).json({ error: error.message || 'Past panel records could not be loaded.' });
@@ -452,6 +465,7 @@ app.post('/api/sharepoint/panel-records', upload.array('photos', 20), async (req
   if (!openAIConfigured()) return res.status(503).json({ error: 'AI processing is not configured yet. Add OPENAI_API_KEY in Railway, then retry. The panel should remain saved locally.', code: 'OPENAI_NOT_CONFIGURED' });
   try {
     const record = JSON.parse(req.body.record || '{}');
+    if (Array.isArray(record.photoSteps)) record.photoSteps = record.photoSteps.map(p => ({...p,source:normalizePhotoSource(p.source)}));
     if (!record.job?.id || !record.panel?.name || !record.recordId) return res.status(400).json({ error: 'Job, panel name, and record ID are required.' });
     if (!(req.files || []).length) return res.status(400).json({ error: 'At least one panel photo is required.' });
     const photoErrors = validatePhotoRecord(record, req.files.map((file) => file.originalname));
