@@ -6,14 +6,25 @@ export const SYMPTOMS = { tripping: 'Repeated breaker trips', odor: 'Burning or 
 export const DATE_SOURCE = 'https://www.se.com/us/en/faqs/FA274608/';
 export const SCOPE = 'Visual panel review limited to the recorded photos and technician observations. It does not certify electrical safety, code compliance, load capacity, breaker trip performance, connection torque, or hidden conditions.';
 export const text = (v, max = 500) => typeof v === 'string' ? v.trim().replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, max) : '';
-export function unknownAge(reason = 'No verified manufacturing evidence available.') { return { kind: 'unknown', label: 'Manufacturing age unknown', reason, sourceUrl: '', evidence: '' }; }
+export function ageBand(yearFrom, yearTo, now = new Date()) {
+  const current = now.getUTCFullYear();
+  if (!Number.isInteger(yearFrom) || !Number.isInteger(yearTo)) return { key: 'unknown', label: 'Age band unknown' };
+  const youngest = Math.max(0, current - yearTo);
+  const oldest = Math.max(0, current - yearFrom);
+  const reference = Math.floor((youngest + oldest) / 2);
+  if (reference >= 50) return { key: 'legacy', label: 'Legacy / outdated age range', detail: '50+ years since manufacture' };
+  if (reference >= 40) return { key: 'older', label: 'Older equipment', detail: '40–49 years since manufacture' };
+  if (reference >= 25) return { key: 'mature', label: 'Mature equipment', detail: '25–39 years since manufacture' };
+  return { key: 'newer', label: 'Newer equipment', detail: 'Under 25 years since manufacture' };
+}
+export function unknownAge(reason = 'No verified manufacturing evidence available.') { return { kind: 'unknown', label: 'Manufacturing age unknown', ageBand: { key: 'unknown', label: 'Age band unknown' }, reason, sourceUrl: '', evidence: '' }; }
 export function estimateAge(identity = {}, evidence = {}, now = new Date()) {
   const yearNow = now.getUTCFullYear();
   if (evidence.mode === 'documented_range') {
     const from = Number(evidence.yearFrom), to = Number(evidence.yearTo);
     if (!evidence.verified || !Number.isInteger(from) || !Number.isInteger(to) || from < 1900 || to < from || to > yearNow || text(evidence.sourceNote).length < 12) return unknownAge('Enter and verify a supported year range and its documentary source.');
     let sourceUrl = ''; try { const u = new URL(evidence.sourceUrl); if (u.protocol === 'https:' && !u.username && !u.password) sourceUrl = u.href; } catch {}
-    return { kind: 'documented_range', label: `Estimated manufacture: ${from === to ? from : `${from}–${to}`}`, yearFrom: from, yearTo: to, ageLabel: `Approximately ${Math.max(0, yearNow - to - 1)}–${yearNow - from} years since manufacture`, evidence: text(evidence.sourceNote, 2000), sourceUrl, reason: 'Technician-supplied documentary evidence; this is not the installation date.' };
+    return { kind: 'documented_range', label: `Estimated manufacture: ${from === to ? from : `${from}–${to}`}`, yearFrom: from, yearTo: to, ageLabel: `Approximately ${Math.max(0, yearNow - to - 1)}–${yearNow - from} years since manufacture`, ageBand: ageBand(from, to, now), evidence: text(evidence.sourceNote, 2000), sourceUrl, reason: 'Technician-supplied documentary evidence; this is not the installation date.' };
   }
   if (evidence.mode !== 'date_code' || evidence.verified !== true) return unknownAge('Verify the date-code reading and the component it belongs to.');
   if (!['enclosure', 'interior'].includes(evidence.component)) return unknownAge('A breaker or replacement cover date cannot establish the panel manufacturing date.');
@@ -23,7 +34,7 @@ export function estimateAge(identity = {}, evidence = {}, now = new Date()) {
   const year = 2000 + Number(code.slice(0, 2)), week = Number(code.slice(2, 4)), day = Number(code[4]), shift = Number(code[5]);
   const approximateWeek = Math.ceil((((now - Date.UTC(yearNow, 0, 1)) / 86400000) + new Date(Date.UTC(yearNow, 0, 1)).getUTCDay() + 1) / 7);
   if (week < 1 || week > 53 || day < 1 || day > 7 || shift < 1 || year > yearNow || year === yearNow && week > approximateWeek) return unknownAge('The date code is invalid or in the future. Recheck the photo and product format.');
-  return { kind: 'decoded', label: `Manufactured ${year}, week ${week}`, yearFrom: year, yearTo: year, ageLabel: `About ${yearNow - year} years since manufacture`, component: evidence.component, evidence: `Verified ${evidence.component} label: ${code} (YY / week / day / shift).`, sourceUrl: DATE_SOURCE, reason: 'Manufacturer decoding rule; component manufacturing date, not installation date.' };
+  return { kind: 'decoded', label: `Manufactured ${year}, week ${week}`, yearFrom: year, yearTo: year, ageLabel: `About ${yearNow - year} years since manufacture`, ageBand: ageBand(year, year, now), component: evidence.component, evidence: `Verified ${evidence.component} label: ${code} (YY / week / day / shift).`, sourceUrl: DATE_SOURCE, reason: 'Manufacturer decoding rule; component manufacturing date, not installation date.' };
 }
 export function normalizeFinding(f, i, photoIds) {
   const photoId = photoIds.includes(f.photoId) ? f.photoId : '';

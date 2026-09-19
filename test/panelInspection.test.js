@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import {createHash} from 'node:crypto';
-import {AREAS,SYMPTOMS,estimateAge,conditionSummary,normalizeInspection} from '../src/inspection/model.js';
+import {AREAS,SYMPTOMS,ageBand,estimateAge,conditionSummary,normalizeInspection} from '../src/inspection/model.js';
 import {registerInspectionRoutes,validateInspectionPhotos} from '../inspectionRoutes.js';
 import {seal} from '../recallRoutes.js';
 import {inspectPhotos} from '../inspectionAI.js';
@@ -19,6 +19,13 @@ test('age uses verified supported component evidence, never appearance or a brea
  const r=estimateAge(identity,evidence,now);assert.equal(r.kind,'decoded');assert.equal(r.yearFrom,2017);assert.match(r.label,/week 10/);assert.match(r.sourceUrl,/se.com/);
  for(const e of [{...evidence,verified:false},{...evidence,component:'breaker'},{...evidence,component:'cover'},{mode:'unknown'}])assert.equal(estimateAge(identity,e,now).kind,'unknown');
  for(const i of [{...identity,manufacturer:'Other'},{...identity,model:'QOC30'},{...identity,dateCode:'1710'},{...identity,dateCode:'271022'},{...identity,dateCode:'175422'},{...identity,dateCode:'170022'}])assert.equal(estimateAge(i,evidence,now).kind,'unknown');
+});
+test('age spectrum keeps legacy/outdated separate from recall and condition',()=>{
+ assert.equal(ageBand(1973,1973,now).key,'legacy');
+ assert.match(ageBand(1973,1973,now).label,/outdated/i);
+ assert.equal(ageBand(1982,1982,now).key,'older');
+ assert.equal(ageBand(1995,1995,now).key,'mature');
+ assert.equal(ageBand(2015,2015,now).key,'newer');
 });
 test('documentary age range requires a verified source and remains separate from installation',()=>{
  const ev={mode:'documented_range',yearFrom:'1980',yearTo:'1985',sourceNote:'Manufacturer production records identify this model.',verified:true,sourceUrl:'javascript:alert(1)'};
