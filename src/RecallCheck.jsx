@@ -26,29 +26,60 @@ function PhotoInput({ role, onAdd, children, disabled }) {
   return <label className={`secondary recallPhotoInput ${disabled ? 'disabled' : ''}`}>{children}<input disabled={disabled} aria-label={children} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => { const file = event.target.files?.[0]; if (file) onAdd(role, file); event.target.value = ''; }} /></label>;
 }
 function Status({ status }) { return <span className={`recallStatus ${status}`}>{STATUS_LABELS[status] || 'Unable to check'}</span>; }
+function ageContext(dateCode) {
+  const raw = String(dateCode || '').trim();
+  const now = new Date().getFullYear();
+  let year = null;
+  const four = raw.match(/\b(19\d{2}|20\d{2})\b/);
+  const short = raw.match(/(?:^|\D)(?:0?[1-9]|1[0-2])\s*[-\/.]\s*(\d{2})(?:\D|$)/);
+  if (four) year = Number(four[1]);
+  else if (short) {
+    const yy = Number(short[1]);
+    year = yy <= (now % 100) + 1 ? 2000 + yy : 1900 + yy;
+  }
+  if (!year || year < 1900 || year > now) return null;
+  const age = now - year;
+  const band = age >= 51 ? 'Legacy / outdated age range' : age >= 41 ? 'Older equipment' : age >= 26 ? 'Mature equipment' : 'Newer equipment';
+  return { raw, year, age, band };
+}
+function AgeContext({ identification }) {
+  const context = ageContext(identification?.dateCode);
+  if (!context) return null;
+  return <div className={`recallAgeBand ${context.age >= 51 ? 'legacy' : context.age >= 41 ? 'older' : ''}`}>
+    <strong>{context.band}</strong>
+    <span>Date stamp {context.raw} suggests {context.year} · approximately {context.age} years old.</span>
+    <small>Age is separate from recall status. Verify that the stamp belongs to the panel enclosure/interior before treating it as manufacturing evidence.</small>
+  </div>;
+}
 function Result({ snapshot, decisions = {}, onDecision, status, readOnly = false }) {
   let currentStatus = status || snapshot.status;
   if (!status) { try { currentStatus = applyDecisions(snapshot, decisions).status; } catch {} }
-  const message = currentStatus === 'matched' ? 'The technician has documented a match against the official recall criteria. Follow the notice and manufacturer instructions for next steps.' : currentStatus === 'no_match' && snapshot.notices.length ? 'The technician excluded the retrieved notices using the documented criteria below. This is not a safety certification.' : snapshot.message;
+  const selectedCount = Object.values(decisions).filter((d) => d?.outcome === 'matched').length;
+  const message = currentStatus === 'matched' ? 'The technician documented an applicable recall. Follow the official notice and manufacturer instructions for next steps.' : snapshot.errors?.length ? snapshot.message : snapshot.notices.length ? 'These are possible notices found for the brand/model. You do not need to disqualify every one. Open only the notice that looks applicable and confirm it if it matches the actual panel.' : snapshot.message;
   return <div className="recallResults">
-    <section className="recallCard"><Status status={currentStatus} /><h2>Recall check results</h2><p>{message}</p><p className="recallNote">Checked {new Date(snapshot.checkedAt).toLocaleString()}. No result in this tool certifies the panel as safe.</p>
-      {snapshot.errors?.length > 0 && <p className="recallError">Lookup incomplete. Retry the official search even if a notice below has been reviewed.</p>}
+    <section className="recallCard"><Status status={currentStatus} /><h2>Recall check results</h2><p>{message}</p><AgeContext identification={snapshot.identification}/><p className="recallNote">Checked {new Date(snapshot.checkedAt).toLocaleString()}. {selectedCount ? `${selectedCount} recall${selectedCount === 1 ? '' : 's'} selected as applicable. ` : ''}No result in this tool certifies the panel as safe.</p>
+      {snapshot.errors?.length > 0 && <p className="recallError">Lookup incomplete. Retry the official search before relying on these results.</p>}
       <details><summary>Sources and search coverage ({snapshot.sources.length})</summary><p>{snapshot.scope}</p><ul>{snapshot.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">CPSC: {new URL(source.url).searchParams.get('ProductName') || new URL(source.url).searchParams.get('Manufacturer') || new URL(source.url).searchParams.get('RecallDescription')}</a><small> Retrieved {new Date(source.retrievedAt).toLocaleString()} · {source.count} notices</small></li>)}</ul></details>
     </section>
     {snapshot.notices.map((notice) => {
       const decision = decisions[notice.id] || { outcome: 'possible' };
+      const selected = decision.outcome === 'matched';
       const update = (patch) => onDecision?.(notice.id, { ...decision, ...patch });
-      return <article className="recallCard" key={notice.id}>
-        <div className="recallNoticeMeta">Recall #{notice.number} · {String(notice.date).slice(0, 10)}</div>
-        <h3>{notice.title}</h3><p>{notice.reason}</p>
-        {notice.missing.length > 0 && <div className="recallCallout"><strong>More label information may be needed</strong><p>{notice.missing.map((key) => labels[key]).join(' · ')}</p><p>Add these identifiers before confirming a match. Read the official notice for the exact label location and criteria. Only qualified personnel should access labels behind a panel cover.</p></div>}
+      const verified = !!decision.product && !!decision.production && !!decision.exclusions;
+      return <details className={`recallCard recallCandidate ${selected ? 'selected' : ''}`} key={notice.id} open={selected}>
+        <summary><span><span className="recallNoticeMeta">Recall #{notice.number} · {String(notice.date).slice(0, 10)}</span><strong>{notice.title}</strong></span><span>{selected ? 'Selected' : notice.modelFound ? 'Model text match' : 'Brand match'}</span></summary>
+        <p>{notice.reason}</p>
+        {notice.missing.length > 0 && <div className="recallCallout"><strong>More label information may be needed</strong><p>{notice.missing.map((key) => labels[key]).join(' · ')}</p><p>Add these identifiers before confirming a match. Read the official notice for the exact label location and criteria.</p></div>}
         <a className="recallSource" href={notice.url} target="_blank" rel="noreferrer">Open official CPSC notice ↗</a>
         {notice.hazard && <p><strong>Hazard:</strong> {notice.hazard}</p>}
-        <details><summary>Affected products, remedy, and contact</summary><h4>Affected products</h4><p className="recallSourceText">{notice.description}</p><h4>Remedy</h4><p className="recallSourceText">{notice.remedy}</p><h4>Contact</h4><p>{notice.contact}</p><p className="recallNote">Follow manufacturer instructions linked from the official notice, including any inspection requirements or exceptions.</p></details>
-        <div className="recallDecision"><label>Technician finding<select disabled={readOnly} value={decision.outcome || 'possible'} onChange={(e) => update({ outcome: e.target.value })}><option value="possible">Possible match — needs review</option><option value="matched" disabled={notice.missing.length > 0}>Recall criteria matched</option><option value="excluded">Excluded by official criteria</option></select></label>
-          {decision.outcome && decision.outcome !== 'possible' && <><p className="recallNote">Confirm each item from the official notice and actual label. If any requirement is unknown, leave this as a possible match.</p>{[['product', 'I verified the affected product and model.'], ['production', 'I verified applicable date, serial, and plant limits (or that none apply).'], ['exclusions', 'I verified exceptions, prior repair markings, and any required manufacturer confirmation.']].map(([key, text]) => <label className="recallCheckline" key={key}><input type="checkbox" disabled={readOnly} checked={!!decision[key]} onChange={(e) => update({ [key]: e.target.checked })} /><span>{text}</span></label>)}<label>Evidence / reason (required)<textarea disabled={readOnly} value={decision.note || ''} maxLength={2000} onChange={(e) => update({ note: e.target.value })} placeholder="Record the actual model, relevant codes, and why the notice applies or excludes this panel." /></label></>}
-        </div>
-      </article>;
+        <details><summary>Affected products, remedy, and contact</summary><h4>Affected products</h4><p className="recallSourceText">{notice.description}</p><h4>Remedy</h4><p className="recallSourceText">{notice.remedy}</p><h4>Contact</h4><p>{notice.contact}</p></details>
+        {!readOnly && !selected && <button type="button" className="primary recallApplyButton" disabled={notice.missing.length > 0} onClick={() => update({ outcome: 'matched', product: false, production: false, exclusions: false, note: '' })}>This recall applies</button>}
+        {selected && <div className="recallDecision">
+          {!readOnly && <button type="button" className="recallTextButton" onClick={() => update({ outcome: 'possible', product: false, production: false, exclusions: false, note: '' })}>Remove this recall</button>}
+          <label className="recallCheckline"><input type="checkbox" disabled={readOnly} checked={verified} onChange={(e) => update({ product: e.target.checked, production: e.target.checked, exclusions: e.target.checked })} /><span>I verified the affected product/model, production limits, and exceptions against the official notice and the actual panel label.</span></label>
+          <label>Why this recall applies (required)<textarea disabled={readOnly} value={decision.note || ''} maxLength={2000} onChange={(e) => update({ note: e.target.value })} placeholder="Example: Panel model, date stamp/serial range, and other criteria match the official notice." /></label>
+        </div>}
+      </details>;
     })}
   </div>;
 }
